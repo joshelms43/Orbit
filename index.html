@@ -1179,18 +1179,39 @@ function renderAuth(){
     <div class="cx-mark">Or<b>bit</b></div>
     <div class="cx-tag">See how close you came.</div>
     <div class="cx-card">
-      <label class="cx-label">Your email</label>
+      <label class="cx-label">Email</label>
       <input id="cx-email" class="cx-input" type="email" placeholder="you@email.com" autocomplete="email"/>
-      <button id="cx-send" class="cx-btn">Email me a sign-in link</button>
+      <label class="cx-label" style="margin-top:12px">Password</label>
+      <input id="cx-pw" class="cx-input" type="password" placeholder="at least 6 characters" autocomplete="current-password"/>
+      <button id="cx-signin" class="cx-btn">Sign in</button>
+      <button id="cx-signup" class="cx-btn ghost" style="margin-top:8px">Create account</button>
       <div id="cx-msg" class="cx-msg"></div>
+    </div>
+    <div class="cx-card">
+      <label class="cx-label">No password? Get a one-time email link</label>
+      <button id="cx-link" class="cx-btn ghost">Email me a sign-in link</button>
+      <div id="cx-msg2" class="cx-msg"></div>
     </div>`);
-  const send=qs('cx-send'), email=qs('cx-email'), msg=qs('cx-msg');
-  send.onclick=async()=>{ const e=email.value.trim(); if(!e){msg.textContent='Enter your email.';return;}
-    send.disabled=true; send.textContent='Sending…';
+  const email=qs('cx-email'), pw=qs('cx-pw'), msg=qs('cx-msg'), msg2=qs('cx-msg2');
+  qs('cx-signin').onclick=async()=>{ const e=email.value.trim(), p=pw.value;
+    if(!e||!p){msg.textContent='Enter email and password.';return;}
+    msg.textContent='Signing in…';
+    const {error}=await sb.auth.signInWithPassword({email:e,password:p});
+    if(error){msg.textContent=error.message;} else { bootReal(); } };
+  qs('cx-signup').onclick=async()=>{ const e=email.value.trim(), p=pw.value;
+    if(!e||p.length<6){msg.textContent='Password must be 6+ characters.';return;}
+    msg.textContent='Creating account…';
+    const {data,error}=await sb.auth.signUp({email:e,password:p});
+    if(error){msg.textContent=error.message;}
+    else if(data.session){ bootReal(); }
+    else { msg.textContent='Account created — now tap Sign in.'; } };
+  qs('cx-link').onclick=async()=>{ const e=email.value.trim();
+    if(!e){msg2.textContent='Enter your email above first.';return;}
+    qs('cx-link').disabled=true; qs('cx-link').textContent='Sending…';
     const {error}=await sb.auth.signInWithOtp({email:e, options:{emailRedirectTo:location.href.split('#')[0]}});
-    if(error){msg.textContent=error.message; send.disabled=false; send.textContent='Email me a sign-in link';}
-    else { msg.textContent='Check your inbox — open the link on this phone.'; send.textContent='Link sent ✓'; } };
-  email.addEventListener('keydown',e=>{ if(e.key==='Enter')send.click(); });
+    if(error){msg2.textContent=error.message; qs('cx-link').disabled=false; qs('cx-link').textContent='Email me a sign-in link';}
+    else { msg2.textContent='Check your inbox — open the link on this device.'; qs('cx-link').textContent='Link sent ✓'; } };
+  pw.addEventListener('keydown',e=>{ if(e.key==='Enter')qs('cx-signin').click(); });
 }
 
 function renderOnboard(){
@@ -1263,12 +1284,22 @@ async function renderAccount(){
     <div class="cx-tag">${MYPROFILE.name||''}</div>
     <div class="cx-card"><label class="cx-label">Your invite code</label><div class="cx-code">${code}</div>
       <button id="cx-add" class="cx-btn ghost">Add / manage friends</button></div>
+    <div class="cx-card">
+      <label class="cx-label">Set a password (then you can sign in anywhere)</label>
+      <input id="cx-newpw" class="cx-input" type="password" placeholder="at least 6 characters" autocomplete="new-password"/>
+      <button id="cx-setpw" class="cx-btn ghost">Save password</button>
+      <div id="cx-pwmsg" class="cx-msg"></div>
+    </div>
     <div class="cx-card"><div class="cx-note">Location is logged only while Orbit is open in the foreground. Continuous background tracking comes with the native app.</div></div>
     <button id="cx-out" class="cx-btn danger">Sign out</button>
     <button id="cx-back" class="cx-btn ghost" style="margin-top:8px">Back</button>`);
   qs('cx-add').onclick=()=>renderAddFriend(false);
   qs('cx-back').onclick=()=>go('home');
   qs('cx-out').onclick=async()=>{ await sb.auth.signOut(); location.reload(); };
+  qs('cx-setpw').onclick=async()=>{ const p=qs('cx-newpw').value; const m=qs('cx-pwmsg');
+    if(p.length<6){m.textContent='Password must be 6+ characters.';return;}
+    m.textContent='Saving…'; const {error}=await sb.auth.updateUser({password:p});
+    m.textContent=error?error.message:'Saved ✓ — you can now sign in with your email + this password.'; };
 }
 
 function renderFirstReveal(){
