@@ -1,0 +1,4 @@
+window.ORBIT_CONFIG = {
+  SUPABASE_URL: "https://goosxrrloboghwfwuwke.supabase.co",
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imdvb3N4cnJsb2JvZ2h3Znd1d2tlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI4MDE3NTUsImV4cCI6MjA5ODM3Nzc1NX0.V6bDg0tphUFS3iOzNpQPMjd-MzWXUBf1nJJGWQlRDdE"
+};
