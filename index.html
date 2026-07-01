@@ -301,6 +301,29 @@ body{display:flex;align-items:center;justify-content:center;overflow:hidden}
 .cx-pending{margin-left:auto;font-size:11px;color:var(--ink3);letter-spacing:.02em}
 .cx-fdot{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
 .cx-empty{color:var(--ink3);font-size:14px}
+/* friend requests */
+.cx-req{display:flex;align-items:center;gap:10px;padding:9px 0}
+.cx-req+.cx-req{border-top:1px solid var(--line)}
+.cx-reqname{font-size:15px;color:var(--ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cx-reqbtns{display:flex;gap:7px;flex:0 0 auto}
+.cx-mini{border:none;border-radius:9px;padding:7px 13px;font-size:12.5px;font-weight:650;cursor:pointer}
+.cx-mini.ok{background:var(--gold);color:#1a1710}
+.cx-mini.no{background:rgba(255,255,255,.05);color:var(--ink2);border:1px solid var(--line2)}
+.cx-pending2{font-size:12px;color:var(--ink3);flex:0 0 auto}
+.cx-link{background:none;border:none;color:var(--gold2);font-size:12px;cursor:pointer;padding:0;text-decoration:underline}
+/* leaderboards */
+.lb-val.far b{color:#a9c1d2}
+.bd-empty{color:var(--ink3);font-size:14px;padding:6px 2px}
+.bd-loading{padding:48px 24px;text-align:center;color:var(--ink3);font-size:14px}
+.lb-pair{display:flex;flex:0 0 auto;width:34px;justify-content:center;align-items:center}
+.lb-pd{width:21px;height:21px;border-radius:50%;border:2px solid #0A0A0C}
+.lb-pd+.lb-pd{margin-left:-8px}
+.bd-teaser{display:flex;align-items:center;justify-content:space-between;cursor:pointer;transition:opacity .15s ease}
+.bd-teaser:active{opacity:.6}
+.bd-teaser-l{display:flex;align-items:center;gap:13px}
+.bd-teaser-em{font-size:24px;filter:drop-shadow(0 3px 10px rgba(216,176,106,.3))}
+.bd-teaser-t{font-size:15px;color:var(--ink);font-weight:500}
+.bd-teaser-s{font-size:12px;color:var(--ink3);margin-top:2px}
 .cx-note{color:var(--ink2);font-size:14px;line-height:1.55}
 .acctbtn{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:var(--surface);border:1px solid var(--line);color:var(--ink);font-size:14px;cursor:pointer;margin-left:8px}
 /* ---- empty home (no friends yet) ---- */
@@ -1155,6 +1178,14 @@ function renderHome(){
     <div class="sec-h"><h3>Closest relationships</h3></div>
     <div class="card">${lb}</div>
 
+    <div class="sec-h"><h3>Leaderboards</h3><span>you &amp; friends</span></div>
+    <div class="card bd-teaser" data-go="boards">
+      <div class="bd-teaser-l"><span class="bd-teaser-em">🏆</span>
+        <div><div class="bd-teaser-t">Streaks &amp; furthest apart</div>
+          <div class="bd-teaser-s">Top 10 across you and your friends</div></div></div>
+      <div class="chev">${ICON.fwd}</div>
+    </div>
+
     <div class="sec-h"><h3>Who was closest, day by day</h3><span>daily rank</span></div>
     <div class="card"><div class="legend">${legend}</div>${rankChart(world.friends, world.dates)}</div>
 
@@ -1169,6 +1200,92 @@ function renderHome(){
   </div>`;
   fieldReplay(document.getElementById('heroCv'), top.yesterday, top, {duration:8500, loop:true, ambient:true});
   wire();
+}
+async function renderBoards(){
+  phone.dataset.full='';
+  const head=`<div class="topbar"><button class="iconbtn" data-go="home">${ICON.back}</button>
+      <div class="wordmark">Leaderboards</div><div style="width:40px"></div></div>`;
+  app.innerHTML=`<div class="screen">${head}<div class="bd-loading">Loading your circle…</div></div>`;
+  wire();
+
+  // aggregate records for EVERY pair in your circle — includes pairs that don't involve you
+  let recs=[], mem={};
+  if(sb){ try{
+    const {data}=await sb.rpc('network_records');
+    if(data){ (data.members||[]).forEach(m=>{mem[m.id]=m;});
+      (data.records||[]).forEach(r=>recs.push({a:r.a,b:r.b,ep:dayStartEpoch(r.day),m:r.m})); }
+  }catch(e){} }
+  // fallback (offline / demo): use your own pairs from the loaded world
+  if(!recs.length && world && world.friends){
+    mem[ME||'me']={id:ME||'me',name:(world.me&&world.me.name)||'You',color:(MYPROFILE&&MYPROFILE.color)||'#D8B06A'};
+    world.friends.forEach(f=>{ mem[f.id]={id:f.id,name:f.name,color:f.color};
+      f.records.forEach(r=>recs.push({a:ME||'me',b:f.id,ep:+r.date,m:r.closest})); });
+  }
+
+  const medal=k=>['🥇','🥈','🥉'][k-1]||String(k);
+  const nameOf =id=> id===ME ? 'You' : ((mem[id]&&mem[id].name)||'Friend');
+  const colorOf=id=> id===ME ? ((MYPROFILE&&MYPROFILE.color)||'#D8B06A') : ((mem[id]&&mem[id].color)||'#9aa3ad');
+  const pairLabel=(a,b)=> (a===ME||b===ME) ? `You & ${nameOf(a===ME?b:a)}` : `${nameOf(a)} & ${nameOf(b)}`;
+  const pairDots=(a,b)=>`<div class="lb-pair"><span class="lb-pd" style="background:${colorOf(a)}"></span><span class="lb-pd" style="background:${colorOf(b)}"></span></div>`;
+  const dnum=ep=>Math.round(ep/86400000);
+
+  // group by unordered pair
+  const pairs={};
+  recs.forEach(r=>{ const k=r.a<r.b?r.a+'|'+r.b:r.b+'|'+r.a; (pairs[k]=pairs[k]||[]).push(r); });
+
+  // longest run of consecutive days within 100 m, per pair
+  const streaks=[];
+  Object.entries(pairs).forEach(([k,rs])=>{
+    rs.sort((x,y)=>x.ep-y.ep);
+    let best=0,cur=0,prev=null;
+    rs.forEach(r=>{ const dn=dnum(r.ep);
+      if(r.m<=100){ cur=(prev!==null&&dn-prev===1)?cur+1:1; if(cur>best)best=cur; } else cur=0;
+      prev=dn; });
+    if(best>0){ const [a,b]=k.split('|'); streaks.push({a,b,n:best}); }
+  });
+  streaks.sort((x,y)=>y.n-x.n);
+  const sTop=streaks.slice(0,10);
+
+  // furthest single days across the whole circle
+  const fTop=recs.slice().sort((x,y)=>y.m-x.m).slice(0,10);
+
+  const srow=sTop.length?sTop.map((x,i)=>`
+    <div class="lb-row">
+      <div class="lb-rank">${medal(i+1)}</div>
+      ${pairDots(x.a,x.b)}
+      <div class="lb-main"><div class="lb-name">${pairLabel(x.a,x.b)}</div><div class="lb-sub">days in a row together</div></div>
+      <div class="lb-val"><b>${x.n}<small> day${x.n===1?'':'s'}</small></b></div>
+    </div>`).join(''):'<div class="bd-empty">No streaks yet — a run of days together shows up here.</div>';
+
+  const frow=fTop.length?fTop.map((x,i)=>{const[n,u]=distParts(x.m);
+    const mine=resolveMineMoment(x.a,x.b,x.ep);
+    const attr=mine?`data-replay="${mine.friendId}" data-day="${mine.dayIndex}"`:'';
+    return `<div class="lb-row" ${attr}>
+      <div class="lb-rank">${medal(i+1)}</div>
+      ${pairDots(x.a,x.b)}
+      <div class="lb-main"><div class="lb-name">${pairLabel(x.a,x.b)}</div><div class="lb-sub">${fDate(new Date(x.ep),{weekday:'short',day:'numeric',month:'short'})}</div></div>
+      <div class="lb-val far"><b>${n}<small> ${u}</small></b></div>
+      ${mine?`<div class="chev">${ICON.fwd}</div>`:''}
+    </div>`;}).join(''):'<div class="bd-empty">No days recorded yet.</div>';
+
+  app.innerHTML=`<div class="screen">${head}
+    <div class="sec-h"><h3>Longest streaks</h3><span>anyone in your circle</span></div>
+    <div class="card">${srow}</div>
+    <div class="sec-h"><h3>Furthest apart</h3><span>biggest gaps</span></div>
+    <div class="card">${frow}</div>
+    <div style="height:24px"></div>
+  </div>`;
+  wire();
+}
+function resolveMineMoment(a,b,ep){
+  if(a!==ME && b!==ME) return null;
+  if(!world||!world.friends) return null;
+  const otherId = a===ME ? b : a;
+  const fr=world.friends.find(f=>f.id===otherId);
+  if(!fr) return null;
+  const rec=fr.records.find(r=>(+r.date)===ep);
+  if(!rec) return null;
+  return {friendId:otherId, dayIndex:rec.dayIndex};
 }
 function miniArchive(){
   const recs=world.friends[0].records;
@@ -1383,7 +1500,7 @@ function wire(){
 const S={view:'intro',order:'far',idx:0,friendId:null,day:null,back:'home'};
 function go(view,patch={}){ clearAnims(); Object.assign(S,{view},patch); render(); app.scrollTop=0; }
 function render(){
-  ({intro:renderIntro,reveal:renderReveal,home:renderHome,
+  ({intro:renderIntro,reveal:renderReveal,home:renderHome,boards:renderBoards,
     friend:renderFriend,viewer:renderViewer,archive:renderArchive,account:renderAccount}[S.view]||renderHome)();
 }
 document.addEventListener('keydown',e=>{
@@ -1489,35 +1606,73 @@ async function friendRows(){
   return others.map(o=>({...(by[o.id]||{}), id:o.id, since:o.since}));
 }
 
+async function friendRequests(){
+  const {data:reqs}=await sb.from('friend_requests').select('id,from_user,to_user,created_at');
+  const rs=reqs||[];
+  const ids=[...new Set(rs.flatMap(r=>[r.from_user,r.to_user]))].filter(id=>id!==ME);
+  let by={};
+  if(ids.length){ const {data:profs}=await sb.from('profiles').select('id,name,color').in('id',ids);
+    by=Object.fromEntries((profs||[]).map(p=>[p.id,p])); }
+  return {
+    incoming: rs.filter(r=>r.to_user===ME).map(r=>({id:r.id, who:by[r.from_user]||{}})),
+    outgoing: rs.filter(r=>r.from_user===ME).map(r=>({id:r.id, who:by[r.to_user]||{}}))
+  };
+}
+
 async function renderAddFriend(first){
   const code=(MYPROFILE.invite_code||'------');
-  const fr=await friendRows();
-  const list=fr.length?fr.map(f=>`<div class="cx-frow"><span class="cx-fdot" style="background:${f.color||'#888'}"></span>${f.name||'Friend'}</div>`).join(''):'<div class="cx-empty">No friends linked yet.</div>';
+  const [fr, rq] = await Promise.all([
+    friendRows().catch(()=>[]),
+    friendRequests().catch(()=>({incoming:[],outgoing:[]}))
+  ]);
+  const friendList = fr.length
+    ? fr.map(f=>`<div class="cx-frow"><span class="cx-fdot" style="background:${f.color||'#888'}"></span>${f.name||'Friend'}</div>`).join('')
+    : '<div class="cx-empty">No friends yet.</div>';
+  const incoming = rq.incoming.map(r=>`<div class="cx-req">
+      <span class="cx-fdot" style="background:${r.who.color||'#888'}"></span>
+      <span class="cx-reqname">${r.who.name||'Someone'}</span>
+      <span class="cx-reqbtns"><button class="cx-mini ok" data-acc="${r.id}">Accept</button><button class="cx-mini no" data-dec="${r.id}">Decline</button></span>
+    </div>`).join('');
+  const outgoing = rq.outgoing.map(r=>`<div class="cx-req">
+      <span class="cx-fdot" style="background:${r.who.color||'#888'}"></span>
+      <span class="cx-reqname">${r.who.name||'Someone'}</span>
+      <span class="cx-pending2">pending · <button class="cx-link" data-cancel="${r.id}">cancel</button></span>
+    </div>`).join('');
   app.innerHTML = shell(`
     <div class="cx-mark">${first?'Add a friend':'Friends'}</div>
-    <div class="cx-tag">Orbit needs a friend who's also tracking.</div>
+    <div class="cx-tag">Connect with a friend who's also on Orbit.</div>
     <div class="cx-card">
-      <label class="cx-label">Your code — share it</label>
+      <label class="cx-label">Your code</label>
       <div class="cx-code">${code}</div>
       <button id="cx-share" class="cx-btn ghost">Share my code</button>
     </div>
     <div class="cx-card">
-      <label class="cx-label">Enter a friend's code</label>
+      <label class="cx-label">Add by code</label>
       <input id="cx-rc" class="cx-input" type="text" placeholder="abc123" maxlength="12" autocapitalize="off"/>
-      <button id="cx-redeem" class="cx-btn">Link up</button>
+      <button id="cx-redeem" class="cx-btn">Send request</button>
       <div id="cx-msg" class="cx-msg"></div>
     </div>
-    <div class="cx-card"><label class="cx-label">Linked friends</label>${list}</div>
-    ${fr.length?'<button id="cx-go" class="cx-btn" style="margin-top:4px">Enter Orbit →</button>':''}
+    ${incoming?`<div class="cx-card"><label class="cx-label">Friend requests</label>${incoming}</div>`:''}
+    ${outgoing?`<div class="cx-card"><label class="cx-label">Sent</label>${outgoing}</div>`:''}
+    <div class="cx-card"><label class="cx-label">Friends${fr.length?' · '+fr.length:''}</label>${friendList}</div>
+    ${fr.length&&first?'<button id="cx-go" class="cx-btn" style="margin-top:4px">Enter Orbit →</button>':''}
     ${first?'':'<button id="cx-back" class="cx-btn ghost" style="margin-top:6px">Back</button>'}`);
   qs('cx-share').onclick=()=>{ const txt=`Add me on Orbit — my code is ${code}`;
     if(navigator.share)navigator.share({text:txt}).catch(()=>{});
     else navigator.clipboard.writeText(code).then(()=>{qs('cx-share').textContent='Copied ✓';}); };
   qs('cx-redeem').onclick=async()=>{ const c=qs('cx-rc').value.trim(); const msg=qs('cx-msg'); if(!c)return;
-    msg.textContent='Linking…';
-    const {data,error}=await sb.rpc('redeem_invite',{code:c});
+    msg.textContent='Sending…';
+    const {data,error}=await sb.rpc('request_friend',{code:c});
     if(error){msg.textContent=error.message;return;}
-    if(data&&data.ok){ renderAddFriend(first); } else { msg.textContent=(data&&data.error)||'Could not link.'; } };
+    if(data&&data.ok){
+      msg.textContent = data.status==='accepted' ? "You're now friends!"
+                      : data.status==='already_friends' ? 'Already friends.'
+                      : 'Request sent ✓';
+      setTimeout(()=>renderAddFriend(first),750);
+    } else { msg.textContent=(data&&data.error)||'Could not send.'; } };
+  document.querySelectorAll('[data-acc]').forEach(b=>b.onclick=async()=>{ b.textContent='…'; await sb.rpc('respond_friend',{req:b.dataset.acc,accept:true}); renderAddFriend(first); });
+  document.querySelectorAll('[data-dec]').forEach(b=>b.onclick=async()=>{ b.textContent='…'; await sb.rpc('respond_friend',{req:b.dataset.dec,accept:false}); renderAddFriend(first); });
+  document.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=async()=>{ await sb.rpc('cancel_friend',{req:b.dataset.cancel}); renderAddFriend(first); });
   if(qs('cx-go'))qs('cx-go').onclick=()=>bootReal();
   if(qs('cx-back'))qs('cx-back').onclick=()=>go('home');
 }
