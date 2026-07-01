@@ -570,11 +570,14 @@ const byId=id=>world.friends.find(f=>f.id===id);
 /* ---- animation registry ---- */
 let anims=[];
 function clearAnims(){anims.forEach(c=>{try{c()}catch(e){}});anims=[];}
-function animate(dur, fn, {loop=false}={}){
-  let raf, start=null, killed=false;
+function animate(dur, fn, {loop=false, fps=0}={}){
+  let raf, start=null, killed=false, last=-1;
+  const minDelta = fps>0 ? 1000/fps : 0;
   const ease=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
-  function step(ts){ if(killed)return; if(start===null)start=ts; let t=(ts-start)/dur;
-    if(t>=1){ fn(1,ease(1)); if(loop){start=ts; raf=requestAnimationFrame(step);} else return; }
+  function step(ts){ if(killed)return; if(start===null)start=ts;
+    if(minDelta && last>=0 && ts-last<minDelta){ raf=requestAnimationFrame(step); return; }  // throttle to target fps
+    last=ts; let t=(ts-start)/dur;
+    if(t>=1){ fn(1,ease(1)); if(loop){start=ts; last=-1; raf=requestAnimationFrame(step);} else return; }
     else { fn(t,ease(t)); raf=requestAnimationFrame(step); } }
   raf=requestAnimationFrame(step);
   const cancel=()=>{killed=true;cancelAnimationFrame(raf);};
@@ -669,7 +672,7 @@ function fieldReplay(canvas, rec, friend, {duration=6200, loop=true, ambient=fal
   const t0=pts[0].t,tC=pts[ci].t;
   return animate(duration, rawP=>{const tl=replayTimeline(rawP,t0,tC);
     K=1+ZK*tl.focus; CX=wideCX+(closeMX-wideCX)*(canZoom?tl.focus:0); CY=wideCY+(closeMY-wideCY)*(canZoom?tl.focus:0);
-    ctx.clearRect(0,0,W,H); paint(tl.headT,tl.env,tl.focus,rawP,W,H);},{loop:false});
+    ctx.clearRect(0,0,W,H); paint(tl.headT,tl.env,tl.focus,rawP,W,H);},{loop:false, fps:ambient?30:45});
 }
 
 /* ---- real Sunshine Coast map; smooth fly-in to the moment, then hold ---- */
@@ -752,11 +755,11 @@ function mapReplay(container, rec, friend, {duration=6200, interactive=false, fr
     }
     ctx.clearRect(0,0,cv.width,cv.height);paint(tl.headT,tl.env,tl.focus,rawP,cv.width,cv.height);}
   map.on('move zoom resize',()=>{ctx.clearRect(0,0,cv.width,cv.height);paint(last.headT,last.env,last.focus,last.rawP,cv.width,cv.height);});
-  let cancelAnim=animate(duration,frame,{loop:false});
+  let cancelAnim=animate(duration,frame,{loop:false, fps:45});
   setTimeout(()=>{map.invalidateSize();size();if(curZ===wideZoom)applyFit();frame(last.rawP);},80);
   const cleanup=()=>{try{cancelAnim&&cancelAnim()}catch(e){}try{map.remove()}catch(e){}};
   anims.push(cleanup);
-  return {cancel:cleanup, restart:()=>{try{cancelAnim&&cancelAnim()}catch(e){}curZ=wideZoom;try{map.setView(wideCenter,wideZoom,{animate:false})}catch(e){}cancelAnim=animate(duration,frame,{loop:false});}};
+  return {cancel:cleanup, restart:()=>{try{cancelAnim&&cancelAnim()}catch(e){}curZ=wideZoom;try{map.setView(wideCenter,wideZoom,{animate:false})}catch(e){}cancelAnim=animate(duration,frame,{loop:false, fps:45});}};
 }
 
 /* ---- static fallback when a replay is too thin/degenerate to animate ---- */
@@ -849,7 +852,7 @@ function ambientDots(cv){
   animate(16000, (t)=>{ ctx.clearRect(0,0,W,H);
     dots.forEach((d,i)=>{ const a=t*6.28+i*2; const x=(d.x+Math.cos(a)*.06)*W, y=(d.y+Math.sin(a*.8)*.05)*H;
       ctx.save(); ctx.shadowColor=d.c; ctx.shadowBlur=40*DPR; ctx.globalAlpha=.5; ctx.fillStyle=d.c;
-      ctx.beginPath(); ctx.arc(x,y,d.r*DPR,0,7); ctx.fill(); ctx.restore(); }); }, {loop:true});
+      ctx.beginPath(); ctx.arc(x,y,d.r*DPR,0,7); ctx.fill(); ctx.restore(); }); }, {loop:true, fps:30});
 }
 
 /* ---- reveal stories ---- */
