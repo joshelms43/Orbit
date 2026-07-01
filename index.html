@@ -645,6 +645,7 @@ function makePaint(ctx, project, pts, ci, fcol, DPR, distStr, starts){
 
 /* ---- field fallback (no tiles) — punch-in done by scaling the projection ---- */
 function fieldReplay(canvas, rec, friend, {duration=6200, loop=true, ambient=false, framePad}={}){
+  if(!replayRenderable(rec)) return ()=>{};   // sparse/degenerate replay — skip safely (e.g. ambient hero)
   const ctx=canvas.getContext('2d');const DPR=Math.min(2,window.devicePixelRatio||1);
   const r=canvas.getBoundingClientRect();canvas.width=Math.max(2,r.width*DPR);canvas.height=Math.max(2,r.height*DPR);
   const W=canvas.width,H=canvas.height,pts=rec.replay,ci=rec.closestIndexInReplay;
@@ -677,6 +678,7 @@ function fieldReplay(canvas, rec, friend, {duration=6200, loop=true, ambient=fal
    internally and won't have this. Not worth solving on the web prototype — if a flawless demo
    is ever needed, switch the replay to the tile-less canvas "field" version (fieldReplay). */
 function mapReplay(container, rec, friend, {duration=6200, interactive=false, framePad}={}){
+  if(!replayRenderable(rec)) return staticReplay(container, rec, friend);
   container.innerHTML='';
   const mapEl=document.createElement('div');mapEl.className='map';
   const cv=document.createElement('canvas');cv.className='ov';
@@ -757,8 +759,21 @@ function mapReplay(container, rec, friend, {duration=6200, interactive=false, fr
   return {cancel:cleanup, restart:()=>{try{cancelAnim&&cancelAnim()}catch(e){}curZ=wideZoom;try{map.setView(wideCenter,wideZoom,{animate:false})}catch(e){}cancelAnim=animate(duration,frame,{loop:false});}};
 }
 
+/* ---- static fallback when a replay is too thin/degenerate to animate ---- */
+function staticReplay(container, rec, friend){
+  container.innerHTML='';
+  const d=document.createElement('div');
+  d.style.cssText='position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;color:#9aa3ad;font:500 13px Inter,system-ui,sans-serif;line-height:1.55';
+  const dist=(typeof rec.closest==='number')?fmtDistPlain(rec.closest):'';
+  d.innerHTML=(dist?('Closest point \u2014 <span style="color:#D8B06A">'+dist+'</span><br>'):'')
+    +'<span style="opacity:.7">not enough movement to replay the path</span>';
+  container.appendChild(d);
+  return {cancel(){}, restart(){}};
+}
+
 /* ---- chooser: map when Leaflet is available, field otherwise ---- */
 function startReplay(container, rec, friend, opts={}){
+  if(!replayRenderable(rec)) return staticReplay(container, rec, friend);
   if(typeof L!=='undefined' && opts.map!==false) return mapReplay(container, rec, friend, opts);
   let cv=container.querySelector('canvas.fb');
   if(!cv){container.innerHTML='';cv=document.createElement('canvas');cv.className='fb';cv.style.cssText='position:absolute;inset:0';container.appendChild(cv);}
@@ -1060,7 +1075,8 @@ function renderFriend(){
 function renderViewer(){
   phone.dataset.full='1';
   const f=byId(S.friendId);
-  const rec=S.day!=null? f.records[S.day] : f.yesterday;
+  const rec=(S.day!=null? f.records[S.day] : f.yesterday) || f.yesterday || f.records[f.records.length-1];
+  if(!rec){ app.innerHTML=`<div class="viewer"><div class="vtop"><button class="back" data-go="${S.back||'home'}">${ICON.back}</button></div><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#9aa3ad;font:500 14px Inter,system-ui">No record for this day.</div></div>`; wire(); return; }
   const [n,u]=distParts(rec.closest);
   app.innerHTML=`<div class="viewer">
     <div class="map" id="viewMap"></div><div class="vscrim"></div>
@@ -1324,6 +1340,36 @@ function startLogging(){
   }, ()=>{}, {enableHighAccuracy:true, maximumAge:15000, timeout:20000});
 }
 
+/* ---------- replay hardening ----------
+   Real GPS is sparse and often stationary: two phones sitting on a table log a
+   handful of near-identical fixes, and a frame can come back missing a side
+   (JSON drops an undefined coord, NaN serialises to null). A thin or malformed
+   replay must never crash the morning reveal. Drop any frame whose me/them
+   isn't a real coordinate, renumber, clamp the indices, and guarantee >=2 good
+   frames so the renderers always have something safe to draw. */
+function finiteNum(n){ return typeof n==='number' && isFinite(n); }
+function validPt(p){ return !!p && finiteNum(p.lat) && finiteNum(p.lng); }
+function cleanReplay(raw, iAmA, ci, ms, ts){
+  const mapped=(raw||[]).map(p=>({ t:p.t, me:iAmA?p.a:p.b, them:iAmA?p.b:p.a }));
+  let pts=mapped.filter(f=>validPt(f.me)&&validPt(f.them))
+                .map((f,i)=>({ t:i, me:{lat:f.me.lat,lng:f.me.lng}, them:{lat:f.them.lat,lng:f.them.lng} }));
+  if(!pts.length) return { replay:[], ci:0, ms:0, ts:0 };
+  if(pts.length===1) pts.push({ t:1, me:{...pts[0].me}, them:{...pts[0].them} });
+  const n=pts.length;
+  let CI=(finiteNum(ci)&&ci>=0&&ci<n)?Math.floor(ci):n-1;   // convergence engine puts the closest frame last
+  CI=Math.max(0,Math.min(CI,n-1));
+  const clamp=v=>Math.max(0,Math.min(finiteNum(v)&&v>=0?Math.floor(v):0, CI));
+  return { replay:pts, ci:CI, ms:clamp(ms), ts:clamp(ts) };
+}
+function replayRenderable(rec){
+  const p=rec&&rec.replay, ci=rec&&rec.closestIndexInReplay;
+  return !!(p && p.length>=2 && p[ci] && validPt(p[ci].me) && validPt(p[ci].them));
+}
+function lastThem(r){ const a=r&&r.replay; if(!a||!a.length) return null;
+  const p=a[r.closestIndexInReplay]||a[a.length-1]; return validPt(p&&p.them)?p.them:((a.find(x=>validPt(x.them))||{}).them||null); }
+function firstMe(r){ const a=r&&r.replay; if(!a||!a.length) return null;
+  const p=a[0]; return validPt(p&&p.me)?p.me:((a.find(x=>validPt(x.me))||{}).me||null); }
+
 async function loadWorld(){
   const fr=await friendRows();
   if(!fr.length) return {empty:'no-friends'};
@@ -1337,16 +1383,18 @@ async function loadWorld(){
   const friends=[];
   fr.forEach(f=>{ const rs=groups[f.id]; if(!rs||!rs.length) return;
     const recList=rs.map(r=>{ const iAmA=r.user_a===ME, t=Date.parse(r.closest_t);
+      const rawMs=iAmA?r.a_start_idx:r.b_start_idx, rawTs=iAmA?r.b_start_idx:r.a_start_idx;
+      const cr=cleanReplay(r.replay, iAmA, r.closest_index, rawMs, rawTs);
       return { friend:f.id, date:dayStartEpoch(r.day), dayIndex:idxOf[r.day],
         closest:r.closest_m, closestT:t, closestMin:(r.closest_min!=null?r.closest_min:briMin(t)),
-        replay:(r.replay||[]).map(p=>({t:p.t, me:iAmA?p.a:p.b, them:iAmA?p.b:p.a})),
-        closestIndexInReplay:r.closest_index, meStartIdx:iAmA?r.a_start_idx:r.b_start_idx,
-        themStartIdx:iAmA?r.b_start_idx:r.a_start_idx, rank:0, badges:[] };
+        replay:cr.replay, closestIndexInReplay:cr.ci, meStartIdx:cr.ms,
+        themStartIdx:cr.ts, rank:0, badges:[] };
     }).sort((a,b)=>a.dayIndex-b.dayIndex);
     const last=recList[recList.length-1];
     const since=f.since?Math.max(0,Math.round((Date.now()-Date.parse(f.since))/86400000)):0;
+    const lt=lastThem(last)||{lat:-26.65,lng:153.09};
     friends.push({ id:f.id, name:f.name||'Friend', color:f.color||'#9aa3ad', sinceDays:since,
-      home:{lat:f.home_lat!=null?f.home_lat:last.them.lat, lng:f.home_lng!=null?f.home_lng:last.them.lng},
+      home:{lat:f.home_lat!=null?f.home_lat:lt.lat, lng:f.home_lng!=null?f.home_lng:lt.lng},
       records:recList });
   });
   if(!friends.length) return {empty:'no-records'};
@@ -1368,8 +1416,9 @@ async function loadWorld(){
     else if(f.sinceDays>100)recs[0].badges.push({icon:'🤝',label:'100 days together'}); });
 
   const leaderboard=friends.slice().sort((a,b)=>a.median-b.median).map(f=>({id:f.id}));
-  const meHome={lat:(MYPROFILE.home_lat!=null?MYPROFILE.home_lat:friends[0].records[0].me.lat),
-                lng:(MYPROFILE.home_lng!=null?MYPROFILE.home_lng:friends[0].records[0].me.lng)};
+  const fm=firstMe(friends[0].records[0])||{lat:-26.65,lng:153.09};
+  const meHome={lat:(MYPROFILE.home_lat!=null?MYPROFILE.home_lat:fm.lat),
+                lng:(MYPROFILE.home_lng!=null?MYPROFILE.home_lng:fm.lng)};
   return { me:{id:ME,name:MYPROFILE.name||'You'}, friends, leaderboard, dates, DAYS:dates.length, home:meHome };
 }
 
