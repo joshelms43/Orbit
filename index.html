@@ -1380,7 +1380,11 @@ async function startBackgroundTracking(){
   if(BG_STARTED) return; BG_STARTED=true;
   await ensureDeviceToken();
   try{
-    const BG=cap.registerPlugin('BackgroundGeolocation');
+    // On a remote-loaded page the injected bridge exposes plugins on Capacitor.Plugins
+    // (registerPlugin only exists in the bundled @capacitor/core, which isn't on this page).
+    const BG=(cap.Plugins && cap.Plugins.BackgroundGeolocation)
+           || (cap.registerPlugin && cap.registerPlugin('BackgroundGeolocation'));
+    if(!BG){ BG_STARTED=false; console.warn('[orbit] BackgroundGeolocation plugin not found'); return; }
     await BG.start({
       backgroundTitle:'Orbit',
       backgroundMessage:'Measuring how close you and your friends come today.',
@@ -1388,7 +1392,7 @@ async function startBackgroundTracking(){
       stale:false,
       distanceFilter:25
     }, (location, error)=>{ if(error) return; postFix(location); });
-  }catch(e){ BG_STARTED=false; }
+  }catch(e){ BG_STARTED=false; console.warn('[orbit] tracking start failed', e && e.message); }
 }
 
 /* ---------- replay hardening ----------
