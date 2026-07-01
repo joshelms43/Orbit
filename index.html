@@ -302,6 +302,24 @@ body{display:flex;align-items:center;justify-content:center;overflow:hidden}
 .cx-empty{color:var(--ink3);font-size:14px}
 .cx-note{color:var(--ink2);font-size:14px;line-height:1.55}
 .acctbtn{display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:var(--surface);border:1px solid var(--line);color:var(--ink);font-size:14px;cursor:pointer;margin-left:8px}
+/* ---- empty home (no friends yet) ---- */
+.empty-home{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:56px 30px 44px;min-height:66vh}
+.eh-orbit{position:relative;width:150px;height:150px;margin:0 auto 42px}
+.eh-ring{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(216,176,106,.30)}
+.eh-ring.two{inset:28px;border-color:rgba(124,156,181,.20)}
+.eh-core{position:absolute;top:50%;left:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:var(--gold);box-shadow:0 0 20px 2px rgba(216,176,106,.55)}
+.eh-sat{position:absolute;inset:0;animation:eh-spin 7s linear infinite}
+.eh-sat i{position:absolute;top:-6px;left:50%;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--stone,#7C9CB5);box-shadow:0 0 12px 1px rgba(124,156,181,.5)}
+.eh-sat.inner{inset:28px;animation-duration:4.6s;animation-direction:reverse}
+.eh-sat.inner i{background:#C39B86;width:9px;height:9px;margin-left:-4.5px;top:-4.5px;box-shadow:0 0 10px 1px rgba(195,155,134,.5)}
+@keyframes eh-spin{to{transform:rotate(360deg)}}
+.eh-title{font-family:'Fraunces',Georgia,serif;font-size:26px;font-weight:600;letter-spacing:-.01em;color:var(--ink);margin:0 0 12px}
+.eh-sub{font-size:14.5px;line-height:1.56;color:var(--muted,#9aa3ad);max-width:302px;margin:0 auto 30px}
+.eh-cta{display:inline-flex;align-items:center;justify-content:center;background:var(--gold);color:#1a1710;font-weight:650;font-size:15px;border:none;border-radius:14px;padding:15px 32px;cursor:pointer;box-shadow:0 6px 22px -6px rgba(216,176,106,.5);transition:transform .15s}
+.eh-cta:active{transform:translateY(1px)}
+.eh-code-wrap{margin-top:26px;display:flex;flex-direction:column;align-items:center;gap:7px}
+.eh-code-lbl{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted,#77808a)}
+.eh-code{font-family:'Fraunces',Georgia,serif;font-size:22px;letter-spacing:.16em;color:var(--gold2,#E8C888);background:rgba(216,176,106,.08);border:1px solid rgba(216,176,106,.2);border-radius:10px;padding:8px 18px}
 </style>
 </head>
 <body>
@@ -563,6 +581,29 @@ function distParts(m){
 }
 function fmtClock(min){let h=Math.floor(min/60),m=min%60,ap=h<12?'am':'pm',hh=h%12;if(hh===0)hh=12;return hh+':'+String(m).padStart(2,'0')+' '+ap;}
 function fmtClockSec(e){return new Date(e).toLocaleString('en-AU',{timeZone:'Australia/Brisbane',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true}).toLowerCase().replace(/\u202f|\u00a0/g,' ');}
+// Wall-clock epoch at the animation head. Real records store frames by index (t:0,1,2…) with the true
+// per-frame time in `et`; demo frames already carry a real epoch. Records made before `et` existed get a
+// plausible reconstructed approach that still lands on the exact known closest second.
+function headEpochFn(rec){
+  const pts=(rec&&rec.replay)||[], ci=(rec&&rec.closestIndexInReplay)||0;
+  const indexTimed = pts.length>1 && pts[0].t===0 && pts[1].t===1;
+  const hasET = pts.some(p=>p&&finiteNum(p.et));
+  const cT = rec&&finiteNum(rec.closestT)?rec.closestT:null;
+  const LEGACY_SPAN=140000;                                   // ~2.3 min synthetic approach for pre-`et` records
+  return headT=>{
+    if(!indexTimed) return finiteNum(headT)?headT:cT;         // demo: head is already a real epoch
+    if(hasET){                                                // exact: interpolate the stored per-frame time
+      const i=Math.max(0,Math.min(pts.length-2,Math.floor(headT))), seg=headT-i;
+      let a=pts[i]&&pts[i].et, b=pts[i+1]&&pts[i+1].et;
+      if(!finiteNum(a)) a=(pts.find(p=>p&&finiteNum(p.et))||{}).et;
+      if(!finiteNum(b)) b=a;
+      if(finiteNum(a)&&finiteNum(b)) return a+(b-a)*Math.max(0,Math.min(1,seg));
+      if(finiteNum(a)) return a;
+    }
+    if(cT!=null){ const frac= ci>0?Math.max(0,Math.min(1,headT/ci)):1; return cT-(1-frac)*LEGACY_SPAN; }
+    return null;
+  };
+}
 function fDate(d,o){return d.toLocaleDateString('en-AU',Object.assign({timeZone:'Australia/Brisbane'},o||{weekday:'long',day:'numeric',month:'long'}));}
 function fShort(d){return d.toLocaleDateString('en-AU',{day:'numeric',month:'short'});}
 const byId=id=>world.friends.find(f=>f.id===id);
@@ -647,7 +688,7 @@ function makePaint(ctx, project, pts, ci, fcol, DPR, distStr, starts){
 }
 
 /* ---- field fallback (no tiles) — punch-in done by scaling the projection ---- */
-function fieldReplay(canvas, rec, friend, {duration=6200, loop=true, ambient=false, framePad}={}){
+function fieldReplay(canvas, rec, friend, {duration=6200, loop=true, ambient=false, framePad, onTime}={}){
   if(!replayRenderable(rec)) return ()=>{};   // sparse/degenerate replay — skip safely (e.g. ambient hero)
   const ctx=canvas.getContext('2d');const DPR=Math.min(2,window.devicePixelRatio||1);
   const r=canvas.getBoundingClientRect();canvas.width=Math.max(2,r.width*DPR);canvas.height=Math.max(2,r.height*DPR);
@@ -670,96 +711,136 @@ function fieldReplay(canvas, rec, friend, {duration=6200, loop=true, ambient=fal
   const project=ll=>({x:(X(ll)-CX)*baseScale*K+cxPix, y:-(Y(ll)-CY)*baseScale*K+cyPix});
   const paint=makePaint(ctx,project,pts,ci,friend.color,DPR,fmtDistPlain(rec.closest),{me:rec.meStartIdx||0,them:rec.themStartIdx||0});
   const t0=pts[0].t,tC=pts[ci].t;
+  const epochAt=headEpochFn(rec);
   return animate(duration, rawP=>{const tl=replayTimeline(rawP,t0,tC);
     K=1+ZK*tl.focus; CX=wideCX+(closeMX-wideCX)*(canZoom?tl.focus:0); CY=wideCY+(closeMY-wideCY)*(canZoom?tl.focus:0);
-    ctx.clearRect(0,0,W,H); paint(tl.headT,tl.env,tl.focus,rawP,W,H);},{loop:false, fps:ambient?30:45});
+    ctx.clearRect(0,0,W,H); paint(tl.headT,tl.env,tl.focus,rawP,W,H); if(onTime)onTime(epochAt(tl.headT),tl.focus,tl.env);},{loop:false, fps:ambient?30:45});
 }
 
 /* ---- real Sunshine Coast map; smooth fly-in to the moment, then hold ---- */
-/* NOTE (for native rebuild): the brief tile blank during the zoom-in is a Leaflet/web-tiles
-   artifact only. A native build (MapKit / Mapbox / Google native) caches and zooms tiles
-   internally and won't have this. Not worth solving on the web prototype — if a flawless demo
-   is ever needed, switch the replay to the tile-less canvas "field" version (fieldReplay). */
-function mapReplay(container, rec, friend, {duration=6200, interactive=false, framePad}={}){
+/* The punch-in preloads (below) now match the tile layer's retina @2x URLs and hold their Image
+   refs, so the zoom no longer blanks on retina screens (iPhone/retina Mac). If a future native map
+   (MapKit/Mapbox) is ever swapped in, it caches/zooms tiles internally and this becomes moot. */
+function mapReplay(container, rec, friend, {duration=6200, interactive=false, framePad, onTime}={}){
   if(!replayRenderable(rec)) return staticReplay(container, rec, friend);
   container.innerHTML='';
+  container.style.overflow='hidden';
+  if(getComputedStyle(container).position==='static') container.style.position='relative';
   const mapEl=document.createElement('div');mapEl.className='map';
   const cv=document.createElement('canvas');cv.className='ov';
+  cv.style.position='absolute';cv.style.left='0';cv.style.top='0';cv.style.zIndex='500';cv.style.pointerEvents='none';
   container.appendChild(mapEl);container.appendChild(cv);
+  // attribution rides on the container (not the map div, which we grow + CSS-transform below)
+  const attr=document.createElement('div');
+  attr.textContent='\u00A9 OpenStreetMap \u00A9 CARTO';
+  attr.style.cssText='position:absolute;right:6px;bottom:4px;z-index:600;pointer-events:none;font:400 9px Inter,system-ui,sans-serif;color:rgba(178,184,196,.5);background:rgba(10,10,12,.45);padding:1px 5px;border-radius:4px';
+  container.appendChild(attr);
+
   const pts=rec.replay,ci=rec.closestIndexInReplay;
   const ms=rec.meStartIdx||0, ts=rec.themStartIdx||0;   // each person's last-1km start
   const all=[...pts.slice(ms,ci+1).map(p=>[p.me.lat,p.me.lng]),
              ...pts.slice(ts,ci+1).map(p=>[p.them.lat,p.them.lng])];
   const fp=framePad||{top:60,bottom:60,x:30};
-  const map=L.map(mapEl,{zoomControl:false,attributionControl:true,dragging:interactive,
-    scrollWheelZoom:interactive,doubleClickZoom:interactive,boxZoom:false,keyboard:false,
-    tap:false,zoomSnap:0,minZoom:3,maxZoom:18,fadeAnimation:false,zoomAnimation:false,inertia:true});
-  map.attributionControl.setPrefix('');
+  const DPR=Math.min(2,devicePixelRatio||1);
+  const contSize=()=>{const r=container.getBoundingClientRect();return{w:Math.max(2,r.width),h:Math.max(2,r.height)};};
+  let CS=contSize();
+
+  // The blink was Leaflet re-gridding tiles on every setView during the ~45fps punch-in (dozens of
+  // full grid rebuilds a second). The fix: render the map ONCE at the final zoom in an oversized div,
+  // then animate the fly-in as a pure CSS transform (pan + scale) over those already-drawn tiles.
+  // Leaflet never zooms during the fly-in, so it physically cannot blink. For the interactive explore
+  // map we swap a normal, draggable Leaflet map back in once the fly-in lands.
+  const map=L.map(mapEl,{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false,
+    doubleClickZoom:false,boxZoom:false,keyboard:false,touchZoom:false,tap:false,
+    zoomSnap:0,minZoom:3,maxZoom:18,fadeAnimation:false,zoomAnimation:false,inertia:true});
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    {subdomains:'abcd',maxZoom:20,keepBuffer:10,updateWhenZooming:false,updateWhenIdle:false,
-     attribution:'\u00A9 OpenStreetMap \u00A9 CARTO'}).addTo(map);
+    {subdomains:'abcd',maxZoom:20,keepBuffer:16,updateWhenZooming:false,updateWhenIdle:true}).addTo(map);
+
+  // --- wide framing (both approach paths) + close framing (the two closest dots) ---
   let wideCenter, wideZoom;
-  const closeMid=L.latLng((pts[ci].me.lat+pts[ci].them.lat)/2,(pts[ci].me.lng+pts[ci].them.lng)/2);
-  function applyFit(){
+  (function(){
     let b=L.latLngBounds(all);const c=b.getCenter(),MIN_M=170;
     const dLat=MIN_M/111111,dLng=MIN_M/(111111*Math.cos(c.lat*Math.PI/180));
     b=L.latLngBounds([c.lat-dLat,c.lng-dLng],[c.lat+dLat,c.lng+dLng]).extend(b);
     map.fitBounds(b,{paddingTopLeft:[fp.x,fp.top],paddingBottomRight:[fp.x,fp.bottom],maxZoom:16.5,animate:false});
     wideCenter=map.getCenter();wideZoom=map.getZoom();
-  }
-  applyFit();
-  // close target: frame EXACTLY the two closest dots — computed mathematically (no setView round-trips,
-  // which would thrash tiles and flash blank). The map only ever sets the wide view during setup.
-  let closeCenter=closeMid, closeZoom=wideZoom;
+  })();
+  let closeCenter=L.latLng((pts[ci].me.lat+pts[ci].them.lat)/2,(pts[ci].me.lng+pts[ci].them.lng)/2), closeZoom=wideZoom;
   (function(){
     const cb=L.latLngBounds([pts[ci].me.lat,pts[ci].me.lng],[pts[ci].them.lat,pts[ci].them.lng]);
     const cc=cb.getCenter(),MIN=55,dLat=MIN/111111,dLng=MIN/(111111*Math.cos(cc.lat*Math.PI/180));
     const padded=L.latLngBounds([cc.lat-dLat,cc.lng-dLng],[cc.lat+dLat,cc.lng+dLng]).extend(cb);
-    try{
-      let z=map.getBoundsZoom(padded,false,L.point(fp.x+26,fp.top+26));
-      closeZoom=Math.min(z,17.6); closeCenter=padded.getCenter();
-    }catch(e){}
-    if(closeZoom<wideZoom){closeZoom=wideZoom;closeCenter=closeMid;}   // only ever zoom IN
+    try{let z=map.getBoundsZoom(padded,false,L.point(fp.x+26,fp.top+26)); closeZoom=Math.min(z,17.6); closeCenter=padded.getCenter();}catch(e){}
+    if(closeZoom<wideZoom){closeZoom=wideZoom;closeCenter=map.getCenter();}   // only ever zoom IN
   })();
-  // Preload every tile the punch-in will cross (along the wide->close path) so zooming never blanks:
-  // the browser caches them now, while the wide view is showing, and serves them instantly mid-zoom.
-  (function preloadZoomTiles(){
-    if(typeof Image==='undefined')return;
-    const subs=['a','b','c','d']; let si=0; const seen=new Set();
-    for(let s=0;s<=8;s++){ const f=s/8;
-      const z=Math.round(wideZoom+(closeZoom-wideZoom)*f);
-      const lat=wideCenter.lat+(closeCenter.lat-wideCenter.lat)*f, lng=wideCenter.lng+(closeCenter.lng-wideCenter.lng)*f;
-      const n=Math.pow(2,z), latR=lat*Math.PI/180;
-      const cx=Math.floor((lng+180)/360*n), cy=Math.floor((1-Math.log(Math.tan(latR)+1/Math.cos(latR))/Math.PI)/2*n);
-      for(let dx=-2;dx<=2;dx++)for(let dy=-2;dy<=2;dy++){
-        const x=cx+dx,y=cy+dy; if(x<0||y<0||x>=n||y>=n)continue;
-        const key=z+'/'+x+'/'+y; if(seen.has(key))continue; seen.add(key);
-        const img=new Image(); img.src=`https://${subs[si++%4]}.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`;
-      }
-    }
-  })();
-  const canZoom=closeZoom>wideZoom+0.05;
-  const ctx=cv.getContext('2d'),DPR=Math.min(2,devicePixelRatio||1);
-  function size(){const r=mapEl.getBoundingClientRect();cv.width=Math.max(2,r.width*DPR);cv.height=Math.max(2,r.height*DPR);cv.style.width=r.width+'px';cv.style.height=r.height+'px';}
-  size();
-  const project=ll=>{const p=map.latLngToContainerPoint(L.latLng(ll.lat,ll.lng));return{x:p.x*DPR,y:p.y*DPR};};
+
+  // --- grow the map div so the wide view fits AT the close zoom, then freeze it there ---
+  const sWide=Math.pow(2,wideZoom-closeZoom);                 // scale (<=1) shown at the widest frame
+  const pW=map.project(wideCenter,closeZoom), pC=map.project(closeCenter,closeZoom);
+  const offX=Math.abs(pC.x-pW.x), offY=Math.abs(pC.y-pW.y);
+  const CAP=900, PAD=90;                                      // cap keeps the one-time tile load modest
+  const halfX=Math.min(Math.max((CS.w/2)/sWide, offX+CS.w/2)+PAD, CAP);
+  const halfY=Math.min(Math.max((CS.h/2)/sWide, offY+CS.h/2)+PAD, CAP);
+  const bigW=Math.ceil(2*halfX), bigH=Math.ceil(2*halfY);
+  mapEl.style.inset='auto'; mapEl.style.top='0'; mapEl.style.left='0';
+  mapEl.style.width=bigW+'px'; mapEl.style.height=bigH+'px';
+  mapEl.style.transformOrigin='0 0'; mapEl.style.willChange='transform';
+  map.invalidateSize({animate:false});
+  map.setView(wideCenter, closeZoom, {animate:false});        // FIXED render; wideCenter at the div centre
+
+  // overlay canvas: container-sized, NOT transformed -> dots + labels stay crisp and constant size
+  const sizeCv=()=>{CS=contSize();cv.width=Math.max(2,CS.w*DPR);cv.height=Math.max(2,CS.h*DPR);cv.style.width=CS.w+'px';cv.style.height=CS.h+'px';};
+  sizeCv();
+  let curD=map.latLngToContainerPoint(wideCenter), curS=sWide, landed=false;
+  const project=ll=>{const d=map.latLngToContainerPoint(L.latLng(ll.lat,ll.lng));
+    if(landed) return {x:d.x*DPR, y:d.y*DPR};                 // live map: dots follow Leaflet directly
+    return {x:((d.x-curD.x)*curS + CS.w/2)*DPR, y:((d.y-curD.y)*curS + CS.h/2)*DPR};};
+  const ctx=cv.getContext('2d');
   const paint=makePaint(ctx,project,pts,ci,friend.color,DPR,fmtDistPlain(rec.closest),{me:rec.meStartIdx||0,them:rec.themStartIdx||0});
   const t0=pts[0].t,tC=pts[ci].t;
-  let last={headT:t0,env:0,focus:0,rawP:0}, curZ=wideZoom;
-  function frame(rawP){const tl=replayTimeline(rawP,t0,tC);last={headT:tl.headT,env:tl.env,focus:tl.focus,rawP};
-    if(canZoom){                                           // drive the zoom ourselves, in sync with the overlay
-      const z=wideZoom+(closeZoom-wideZoom)*tl.focus;
-      if(Math.abs(z-curZ)>0.0015){curZ=z;
-        const c=L.latLng(wideCenter.lat+(closeCenter.lat-wideCenter.lat)*tl.focus, wideCenter.lng+(closeCenter.lng-wideCenter.lng)*tl.focus);
-        try{map.setView(c,z,{animate:false})}catch(e){}}    // fires 'move' -> repaint, dots stay locked to the map
-    }
-    ctx.clearRect(0,0,cv.width,cv.height);paint(tl.headT,tl.env,tl.focus,rawP,cv.width,cv.height);}
-  map.on('move zoom resize',()=>{ctx.clearRect(0,0,cv.width,cv.height);paint(last.headT,last.env,last.focus,last.rawP,cv.width,cv.height);});
+  const epochAt=headEpochFn(rec);
+  let last={headT:t0,env:0,focus:0,rawP:0};
+
+  const applyFrozen=focus=>{
+    const z=wideZoom+(closeZoom-wideZoom)*focus; curS=Math.pow(2,z-closeZoom);
+    curD=map.latLngToContainerPoint(L.latLng(wideCenter.lat+(closeCenter.lat-wideCenter.lat)*focus,
+                                             wideCenter.lng+(closeCenter.lng-wideCenter.lng)*focus));
+    mapEl.style.transform='translate('+(CS.w/2-curD.x*curS).toFixed(2)+'px,'+(CS.h/2-curD.y*curS).toFixed(2)+'px) scale('+curS.toFixed(5)+')';
+  };
+  const repaintLive=()=>{if(!landed)return;sizeCv();ctx.clearRect(0,0,cv.width,cv.height);paint(last.headT,last.env,last.focus,last.rawP,cv.width,cv.height);};
+  const frame=rawP=>{const tl=replayTimeline(rawP,t0,tC);last={headT:tl.headT,env:tl.env,focus:tl.focus,rawP};
+    if(!landed) applyFrozen(tl.focus);
+    ctx.clearRect(0,0,cv.width,cv.height);paint(tl.headT,tl.env,tl.focus,rawP,cv.width,cv.height);
+    if(onTime)onTime(epochAt(tl.headT),tl.focus,tl.env);};
+
+  const land=()=>{                                            // hand a real, draggable map to the user
+    if(landed) return; landed=true;
+    mapEl.style.transform='none'; mapEl.style.transformOrigin=''; mapEl.style.willChange='';
+    mapEl.style.width=''; mapEl.style.height=''; mapEl.style.top=''; mapEl.style.left=''; mapEl.style.inset='0';
+    map.invalidateSize({animate:false}); map.setView(closeCenter, closeZoom, {animate:false});
+    if(interactive){map.dragging&&map.dragging.enable();map.scrollWheelZoom&&map.scrollWheelZoom.enable();
+      map.doubleClickZoom&&map.doubleClickZoom.enable();map.touchZoom&&map.touchZoom.enable();}
+    map.on('move zoom resize',repaintLive); repaintLive();
+  };
+
   let cancelAnim=animate(duration,frame,{loop:false, fps:45});
-  setTimeout(()=>{map.invalidateSize();size();if(curZ===wideZoom)applyFit();frame(last.rawP);},80);
-  const cleanup=()=>{try{cancelAnim&&cancelAnim()}catch(e){}try{map.remove()}catch(e){}};
+  let landTimer = interactive ? setTimeout(land, duration+140) : null;
+  setTimeout(()=>{if(!landed){CS=contSize();sizeCv();applyFrozen(last.focus);frame(last.rawP);}},80);
+
+  const cleanup=()=>{try{landTimer&&clearTimeout(landTimer)}catch(e){}try{cancelAnim&&cancelAnim()}catch(e){}try{map.off('move zoom resize',repaintLive)}catch(e){}try{map.remove()}catch(e){}};
   anims.push(cleanup);
-  return {cancel:cleanup, restart:()=>{try{cancelAnim&&cancelAnim()}catch(e){}curZ=wideZoom;try{map.setView(wideCenter,wideZoom,{animate:false})}catch(e){}cancelAnim=animate(duration,frame,{loop:false, fps:45});}};
+  return {cancel:cleanup, restart:()=>{
+    try{cancelAnim&&cancelAnim()}catch(e){}try{landTimer&&clearTimeout(landTimer)}catch(e){}
+    try{map.off('move zoom resize',repaintLive)}catch(e){}
+    landed=false;
+    if(interactive){map.dragging&&map.dragging.disable();map.scrollWheelZoom&&map.scrollWheelZoom.disable();
+      map.doubleClickZoom&&map.doubleClickZoom.disable();map.touchZoom&&map.touchZoom.disable();}
+    mapEl.style.inset='auto';mapEl.style.top='0';mapEl.style.left='0';mapEl.style.width=bigW+'px';mapEl.style.height=bigH+'px';mapEl.style.transformOrigin='0 0';mapEl.style.willChange='transform';
+    map.invalidateSize({animate:false}); map.setView(wideCenter, closeZoom, {animate:false});
+    sizeCv(); last={headT:t0,env:0,focus:0,rawP:0}; applyFrozen(0);
+    cancelAnim=animate(duration,frame,{loop:false, fps:45});
+    landTimer = interactive ? setTimeout(land, duration+140) : null;
+  }};
 }
 
 /* ---- static fallback when a replay is too thin/degenerate to animate ---- */
@@ -870,7 +951,7 @@ function renderReveal(){
     <div class="swipe-cue"><div class="bar"></div><div class="txt">Swipe down to close</div></div>
     <button class="orderbtn" id="orderBtn">${S.order==='close'?'Furthest first':'Closest first'}</button>
     <div class="story-content">
-      <div class="meta">yesterday · closest at ${fmtClockSec(y.closestT)}</div>
+      <div class="meta">yesterday · <span id="revealClockLbl"></span><span id="revealClock">${fmtClockSec(y.closestT)}</span></div>
       <div class="story-name">${f.name}</div>
       <div class="hero-distance">${num}<small>${unit}</small></div>
       <div class="story-rank"><span class="pip" style="background:${f.color}"></span>${ordinal(y.rank)} closest of your ${world.friends.length} friends</div>
@@ -879,7 +960,7 @@ function renderReveal(){
     <div class="tapzone left" id="prevZone"></div>
     <div class="tapzone right" id="nextZone"></div>
   </div>`;
-  startReplay(document.getElementById('storyMap'), y, f, {duration:9000, interactive:false, framePad:{top:104,bottom:268,x:34}});
+  startReplay(document.getElementById('storyMap'), y, f, {duration:9000, interactive:false, framePad:{top:104,bottom:268,x:34}, onTime:(ep,focus)=>{ const c=document.getElementById('revealClock'); if(c&&ep!=null)c.textContent=fmtClockSec(ep); const l=document.getElementById('revealClockLbl'); if(l&&focus>0.9&&!l.textContent)l.textContent='closest at '; }});
   let swiping=false;
   document.getElementById('nextZone').onclick=()=>{ if(swiping)return; S.idx<list.length-1 ? go('reveal',{idx:S.idx+1}) : go('home'); };
   document.getElementById('prevZone').onclick=()=>{ if(swiping)return; S.idx>0 && go('reveal',{idx:S.idx-1}); };
@@ -899,8 +980,34 @@ function renderReveal(){
 function ordinal(n){return n+(['th','st','nd','rd'][(n%100>>3^1&&n%10)||0]||'th');}
 
 /* ---- home ---- */
+function renderHomeEmpty(){
+  phone.dataset.full='';
+  const code=(MYPROFILE&&MYPROFILE.invite_code)||'';
+  app.innerHTML=`<div class="screen">
+    <div class="topbar"><div class="wordmark">Or<b>bit</b></div>
+      <div style="display:flex;align-items:center">
+        ${sb&&MYPROFILE?`<button class="acctbtn" data-go="account">${(MYPROFILE.name||'@')[0].toUpperCase()}</button>`:''}
+      </div></div>
+    <div class="empty-home">
+      <div class="eh-orbit">
+        <div class="eh-ring"></div><div class="eh-ring two"></div>
+        <div class="eh-core"></div>
+        <div class="eh-sat"><i></i></div>
+        <div class="eh-sat inner"><i></i></div>
+      </div>
+      <h2 class="eh-title">You're orbiting solo</h2>
+      <div class="eh-sub">Orbit quietly measures how close each day brings you to the people you care about. Add a friend who's also on Orbit — tomorrow morning you'll get your first moment together.</div>
+      <button class="eh-cta" id="eh-add">Add a friend</button>
+      ${code?`<div class="eh-code-wrap"><span class="eh-code-lbl">or share your code</span><span class="eh-code">${code}</span></div>`:''}
+    </div>
+  </div>`;
+  const add=qs('eh-add'); if(add) add.onclick=()=>renderAddFriend(false);
+  wire();
+}
+
 function renderHome(){
   phone.dataset.full='';
+  if(!world||!world.friends||!world.friends.length){ return renderHomeEmpty(); }
   const list=sorted('close');
   const top=list[0];
   const [tn,tu]=distParts(top.yesterday.closest);
@@ -1405,9 +1512,9 @@ async function startBackgroundTracking(){
 function finiteNum(n){ return typeof n==='number' && isFinite(n); }
 function validPt(p){ return !!p && finiteNum(p.lat) && finiteNum(p.lng); }
 function cleanReplay(raw, iAmA, ci, ms, ts){
-  const mapped=(raw||[]).map(p=>({ t:p.t, me:iAmA?p.a:p.b, them:iAmA?p.b:p.a }));
+  const mapped=(raw||[]).map(p=>({ t:p.t, et:p.et, me:iAmA?p.a:p.b, them:iAmA?p.b:p.a }));
   let pts=mapped.filter(f=>validPt(f.me)&&validPt(f.them))
-                .map((f,i)=>({ t:i, me:{lat:f.me.lat,lng:f.me.lng}, them:{lat:f.them.lat,lng:f.them.lng} }));
+                .map((f,i)=>({ t:i, et:finiteNum(f.et)?f.et:null, me:{lat:f.me.lat,lng:f.me.lng}, them:{lat:f.them.lat,lng:f.them.lng} }));
   if(!pts.length) return { replay:[], ci:0, ms:0, ts:0 };
   if(pts.length===1) pts.push({ t:1, me:{...pts[0].me}, them:{...pts[0].them} });
   const n=pts.length;
@@ -1490,7 +1597,7 @@ async function bootReal(){
   startLogging();
   startBackgroundTracking();
   const w=await loadWorld();
-  if(w.empty==='no-friends'){ renderAddFriend(true); return; }
+  if(w.empty==='no-friends'){ world=null; S.view='home'; renderHomeEmpty(); return; }
   if(w.empty==='no-records'){ renderFirstReveal(); return; }
   world=reviveWorld(w); yDate=world.dates[world.dates.length-1]; render();
 }
