@@ -298,6 +298,7 @@ body{display:flex;align-items:center;justify-content:center;overflow:hidden}
 .cx-sw.on{border-color:#fff;box-shadow:0 0 0 2px var(--c)}
 .cx-code{font-family:var(--disp);font-size:25px;letter-spacing:5px;text-align:center;color:var(--gold);background:var(--bg2);border:1px dashed var(--line);border-radius:12px;padding:14px;text-transform:lowercase}
 .cx-frow{display:flex;align-items:center;gap:9px;padding:7px 0;font-size:15px;color:var(--ink)}
+.cx-pending{margin-left:auto;font-size:11px;color:var(--ink3);letter-spacing:.02em}
 .cx-fdot{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
 .cx-empty{color:var(--ink3);font-size:14px}
 .cx-note{color:var(--ink2);font-size:14px;line-height:1.55}
@@ -1546,12 +1547,22 @@ async function renderAccount(){
     m.textContent=error?error.message:'Saved ✓ — you can now sign in with your email + this password.'; };
 }
 
-function renderFirstReveal(){
+async function renderFirstReveal(){
+  const fr=await friendRows().catch(()=>[]);
+  const code=(MYPROFILE&&MYPROFILE.invite_code)||'------';
+  const linked=fr.length
+    ? `<div class="cx-card"><label class="cx-label">Linked with ${fr.length===1?'':fr.length}</label>${fr.map(f=>`<div class="cx-frow"><span class="cx-fdot" style="background:${f.color||'#888'}"></span>${f.name||'Friend'}<span class="cx-pending">waiting on your first day</span></div>`).join('')}</div>`
+    : '';
   app.innerHTML = shell(`
     <div class="cx-mark">Or<b>bit</b></div>
     <div class="cx-tag">You're linked up.</div>
     <div class="cx-card"><div class="cx-note">Your first reveal appears tomorrow morning — after you and your friends have been out and about with the app open. Keep Orbit running as you go about your day.</div></div>
-    <button id="cx-acc" class="cx-btn ghost">Account & friends</button>`);
+    ${linked}
+    <div class="cx-card"><label class="cx-label">Add more — share your code</label><div class="cx-code">${code}</div>
+      <button id="cx-share" class="cx-btn ghost">Share my code</button></div>
+    <button id="cx-acc" class="cx-btn ghost" style="margin-top:4px">Account &amp; friends</button>`);
+  const sh=qs('cx-share'); if(sh) sh.onclick=()=>{ const txt=`Add me on Orbit — my code is ${code}`;
+    if(navigator.share)navigator.share({text:txt}).catch(()=>{}); else navigator.clipboard.writeText(code).then(()=>{sh.textContent='Copied ✓';}); };
   qs('cx-acc').onclick=()=>renderAccount();
 }
 
