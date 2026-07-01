@@ -320,6 +320,44 @@ body{display:flex;align-items:center;justify-content:center;overflow:hidden}
 .eh-code-wrap{margin-top:26px;display:flex;flex-direction:column;align-items:center;gap:7px}
 .eh-code-lbl{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted,#77808a)}
 .eh-code{font-family:'Fraunces',Georgia,serif;font-size:22px;letter-spacing:.16em;color:var(--gold2,#E8C888);background:rgba(216,176,106,.08);border:1px solid rgba(216,176,106,.2);border-radius:10px;padding:8px 18px}
+/* ============ home glow-up ============ */
+/* hero: lit-from-within, cinematic centrepiece */
+.hero{cursor:pointer;box-shadow:0 20px 44px -30px rgba(0,0,0,.95);transition:transform .22s ease,border-color .22s ease}
+.hero:active{transform:scale(.992)}
+.hero:hover{border-color:var(--line2)}
+.hero>*{position:relative;z-index:2}
+.hero canvas{z-index:1;opacity:.55}
+.hero::before{content:'';position:absolute;z-index:0;right:-46px;top:-58px;width:290px;height:290px;pointer-events:none;
+  background:radial-gradient(circle,rgba(216,176,106,.20),rgba(216,176,106,0) 66%)}
+.hero .dist{font-size:60px;text-shadow:0 0 42px rgba(216,176,106,.32)}
+.replay-tag{margin-top:20px;padding:9px 15px 9px 13px;border-radius:999px;border:1px solid rgba(216,176,106,.22);
+  background:rgba(216,176,106,.06);backdrop-filter:blur(4px)}
+/* section headers: a small gold tick to thread the accent through */
+.sec-h h3{position:relative;padding-left:14px}
+.sec-h h3::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:4px;height:4px;
+  border-radius:50%;background:var(--gold);box-shadow:0 0 8px 1px rgba(216,176,106,.5)}
+/* cards: subtle depth */
+.card,.rcard{box-shadow:0 1px 0 rgba(255,255,255,.035) inset,0 10px 30px -22px rgba(0,0,0,.9)}
+/* most-recent highlight glows like an unseen story */
+.hl-bubble:first-child .hl-ring{box-shadow:0 0 0 1px rgba(216,176,106,.35),0 0 18px -3px rgba(216,176,106,.55)}
+/* leaderboard: gold-tint the top spot + press feedback */
+.card .lb-row:first-child .lb-rank{color:var(--gold2)}
+.lb-row[data-friend]{cursor:pointer;transition:opacity .15s ease}
+.lb-row[data-friend]:active{opacity:.6}
+/* ---- the metric pops up in the middle, above the on-map distance pill (shared by reveal + viewer) ---- */
+.moment-award{position:absolute;left:24px;right:24px;top:calc(50% - 178px);z-index:26;text-align:center;pointer-events:none;
+  opacity:0;transform:translateY(8px);transition:opacity .5s ease,transform .5s ease}
+.moment-award.show{opacity:1;transform:none}
+.moment-award .pill{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;
+  font-size:13.5px;font-weight:600;letter-spacing:.01em;color:var(--gold2);
+  background:rgba(18,16,13,.72);border:1px solid rgba(216,176,106,.34);backdrop-filter:blur(8px);box-shadow:0 6px 20px -6px rgba(0,0,0,.55)}
+.moment-award .pill.far{color:#c3d4de;border-color:rgba(124,156,181,.36);background:rgba(14,17,20,.72)}
+.moment-award .pill .em{font-size:15px}
+/* viewer: same presentation as the reveal, plus back + replay controls */
+.viewer .replaymini{position:absolute;right:20px;bottom:34px;z-index:14;width:44px;height:44px;border-radius:50%;
+  border:1px solid var(--line2);background:rgba(10,10,12,.5);backdrop-filter:blur(8px);color:var(--ink2);
+  display:flex;align-items:center;justify-content:center;cursor:pointer}
+.viewer .replaymini svg{width:18px;height:18px}
 </style>
 </head>
 <body>
@@ -629,6 +667,20 @@ function animate(dur, fn, {loop=false, fps=0}={}){
 function fmtDistPlain(m){return m<1000?Math.round(m)+' m':m<100000?(m/1000).toFixed(2)+' km':Math.round(m/1000).toLocaleString()+' km';}
 function hexA(h,a){const n=parseInt(h.slice(1),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;}
 
+// live separation between the two heads at a given head-time (mirrors makePaint's headAt interpolation)
+function headDistAt(pts, tt){
+  if(!pts||pts.length<2) return null;
+  let hi=pts.length-2;
+  for(let i=0;i<pts.length-1;i++){ if(tt<=pts[i+1].t){ hi=i; break; } }
+  if(hi<0) hi=0;
+  const A=pts[hi], B=pts[hi+1];
+  if(!A||!B||!A.me||!A.them||!B.me||!B.them) return null;
+  const seg=Math.max(0,Math.min(1,(tt-A.t)/Math.max(1e-9,B.t-A.t)));
+  const me={lat:A.me.lat+(B.me.lat-A.me.lat)*seg, lng:A.me.lng+(B.me.lng-A.me.lng)*seg};
+  const them={lat:A.them.lat+(B.them.lat-A.them.lat)*seg, lng:A.them.lng+(B.them.lng-A.them.lng)*seg};
+  return haversine(me, them);
+}
+
 // the choreography: sweep the approach at a steady pace, then begin the zoom the moment they arrive
 function replayTimeline(rawP, t0, tC){
   const sm=t=>{t=t<0?0:t>1?1:t;return t*t*(3-2*t);};
@@ -714,7 +766,7 @@ function fieldReplay(canvas, rec, friend, {duration=6200, loop=true, ambient=fal
   const epochAt=headEpochFn(rec);
   return animate(duration, rawP=>{const tl=replayTimeline(rawP,t0,tC);
     K=1+ZK*tl.focus; CX=wideCX+(closeMX-wideCX)*(canZoom?tl.focus:0); CY=wideCY+(closeMY-wideCY)*(canZoom?tl.focus:0);
-    ctx.clearRect(0,0,W,H); paint(tl.headT,tl.env,tl.focus,rawP,W,H); if(onTime)onTime(epochAt(tl.headT),tl.focus,tl.env);},{loop:false, fps:ambient?30:45});
+    ctx.clearRect(0,0,W,H); paint(tl.headT,tl.env,tl.focus,rawP,W,H); if(onTime)onTime(epochAt(tl.headT),tl.focus,tl.env,headDistAt(pts,tl.headT));},{loop:false, fps:ambient?30:45});
 }
 
 /* ---- real Sunshine Coast map; smooth fly-in to the moment, then hold ---- */
@@ -811,7 +863,7 @@ function mapReplay(container, rec, friend, {duration=6200, interactive=false, fr
   const frame=rawP=>{const tl=replayTimeline(rawP,t0,tC);last={headT:tl.headT,env:tl.env,focus:tl.focus,rawP};
     if(!landed) applyFrozen(tl.focus);
     ctx.clearRect(0,0,cv.width,cv.height);paint(tl.headT,tl.env,tl.focus,rawP,cv.width,cv.height);
-    if(onTime)onTime(epochAt(tl.headT),tl.focus,tl.env);};
+    if(onTime)onTime(epochAt(tl.headT),tl.focus,tl.env,headDistAt(pts,tl.headT));};
 
   const land=()=>{                                            // hand a real, draggable map to the user
     if(landed) return; landed=true;
@@ -944,23 +996,23 @@ function renderReveal(){
   const y=f.yesterday;
   const [num,unit]=distParts(y.closest);
   const segs=list.map((_,i)=>`<div class="seg ${i<S.idx?'done':''} ${i===S.idx?'active':''}"><b></b></div>`).join('');
-  const badges=y.badges.map(b=>`<span class="badge"><i>${b.icon}</i>${b.label}</span>`).join('');
+  const mo=momentFor(f,y);
   app.innerHTML=`<div class="story" id="story">
     <div class="map" id="storyMap"></div><div class="scrim"></div>
     <div class="segments">${segs}</div>
     <div class="swipe-cue"><div class="bar"></div><div class="txt">Swipe down to close</div></div>
     <button class="orderbtn" id="orderBtn">${S.order==='close'?'Furthest first':'Closest first'}</button>
+    <div class="moment-award" id="momentAward"><span class="pill ${mo.kind==='far'?'far':''}"><span class="em">${mo.badge}</span>${mo.tag}</span></div>
     <div class="story-content">
       <div class="meta">yesterday · <span id="revealClockLbl"></span><span id="revealClock">${fmtClockSec(y.closestT)}</span></div>
       <div class="story-name">${f.name}</div>
-      <div class="hero-distance">${num}<small>${unit}</small></div>
+      <div class="hero-distance" id="revealHeroDist">${num}<small>${unit}</small></div>
       <div class="story-rank"><span class="pip" style="background:${f.color}"></span>${ordinal(y.rank)} closest of your ${world.friends.length} friends</div>
-      ${badges?`<div class="badges">${badges}</div>`:''}
     </div>
     <div class="tapzone left" id="prevZone"></div>
     <div class="tapzone right" id="nextZone"></div>
   </div>`;
-  startReplay(document.getElementById('storyMap'), y, f, {duration:9000, interactive:false, framePad:{top:104,bottom:268,x:34}, onTime:(ep,focus)=>{ const c=document.getElementById('revealClock'); if(c&&ep!=null)c.textContent=fmtClockSec(ep); const l=document.getElementById('revealClockLbl'); if(l&&focus>0.9&&!l.textContent)l.textContent='closest at '; }});
+  startReplay(document.getElementById('storyMap'), y, f, {duration:9000, interactive:false, framePad:{top:104,bottom:268,x:34}, onTime:(ep,focus,env,dist)=>{ const c=document.getElementById('revealClock'); if(c&&ep!=null)c.textContent=fmtClockSec(ep); const l=document.getElementById('revealClockLbl'); if(l&&focus>0.9&&!l.textContent)l.textContent='closest at '; const hd=document.getElementById('revealHeroDist'); if(hd&&dist!=null){ const [dn,du]=distParts(focus>0.99?y.closest:dist); hd.innerHTML=`${dn}<small>${du}</small>`; } if(focus>0.985){ const aw=document.getElementById('momentAward'); if(aw) aw.classList.add('show'); } }});
   let swiping=false;
   document.getElementById('nextZone').onclick=()=>{ if(swiping)return; S.idx<list.length-1 ? go('reveal',{idx:S.idx+1}) : go('home'); };
   document.getElementById('prevZone').onclick=()=>{ if(swiping)return; S.idx>0 && go('reveal',{idx:S.idx-1}); };
@@ -1181,6 +1233,64 @@ function renderFriend(){
   wire();
 }
 
+/* ---- shareable moment card ---- */
+// score a bunch of candidate metrics for this record by "shareability"; return the best. Always returns something.
+function momentFor(f,rec){
+  const recs=(f&&f.records)||[], c=rec.closest, idx=rec.dayIndex, lastIdx=recs.length-1;
+  const rank=rec.rank||0, N=(world&&world.friends&&world.friends.length)||0;
+  const TOG=100;                                   // "together" = within this many metres
+  const tog=r=>!!r && r.closest<=TOG;
+  const cl=recs.map(r=>r.closest), maxC=cl.length?Math.max(...cl):c, minC=cl.length?Math.min(...cl):c, multi=recs.length>1;
+  // streaks ending on this day
+  let togStreak=0;   for(let i=idx;i>=0;i--){ if(tog(recs[i])) togStreak++; else break; }
+  let apartStreak=0; for(let i=idx;i>=0;i--){ if(recs[i]&&!tog(recs[i])) apartStreak++; else break; }
+  let no1=0;         for(let i=idx;i>=0;i--){ if(recs[i]&&recs[i].rank===1) no1++; else break; }
+  const togetherTotal=recs.slice(0,idx+1).filter(tog).length;
+  // reunion: days since you were last together (0 if first-ever)
+  let reunion=0, firstEver=false;
+  if(tog(rec)){ let prev=-1; for(let i=idx-1;i>=0;i--){ if(tog(recs[i])){ prev=i; break; } }
+    if(prev>=0) reunion=idx-prev; else if(idx>0) firstEver=true; }
+  // same weekday in a row together (e.g. 10th Monday in a row)
+  let dow=0; if(tog(rec)){ dow=1; for(let i=idx-7;i>=0;i-=7){ if(tog(recs[i])) dow++; else break; } }
+  const weekday=rec.date?rec.date.toLocaleDateString('en-AU',{weekday:'long',timeZone:'Australia/Brisbane'}):'';
+  // local records (closest / furthest in the trailing window)
+  let closestInDays=0; for(let i=idx-1;i>=0;i--){ if(recs[i]&&recs[i].closest<=c) break; closestInDays++; }
+  let furthestInDays=0; for(let i=idx-1;i>=0;i--){ if(recs[i]&&recs[i].closest>=c) break; furthestInDays++; }
+  // friendship age on this date
+  const ageAtRec=(f&&f.sinceDays!=null)?(f.sinceDays-(lastIdx-idx)):null;
+
+  const C=[]; const add=(score,badge,tag,kind)=>{ if(score>0&&tag) C.push({score,badge,tag,kind}); };
+  // all-time records
+  if(multi && recs.length>=5 && c<=minC && c<2000) add(64+(c<1?30:c<10?22:c<50?14:6),'💛',"Closest you've ever been",'near');
+  if(multi && recs.length>=5 && c>=maxC && c>=1000) add(58+(c>=20000?34:c>=10000?26:c>=5000?18:c>=2000?10:4),'🌍','Furthest ever apart','far');
+  // firsts & reunions
+  if(firstEver) add(88,'🎉',"First time you've been together",'near');
+  if(reunion>=2) add(42+Math.min(30,reunion*3),'🔁',`First day together in ${reunion} days`,'near');
+  // anniversaries
+  if(ageAtRec!=null){
+    if(ageAtRec>0 && ageAtRec%365===0) add(84,'🎂',`${ageAtRec/365} year${ageAtRec/365===1?'':'s'} of friendship`,'near');
+    else if([100,200,300,500,750,1000].indexOf(ageAtRec)>=0) add(72,'🎂',`${ageAtRec} days of friendship`,'near');
+  }
+  // streaks
+  if(dow>=2) add(44+Math.min(52,dow*6),'📅',`${ordinal(dow)} ${weekday} in a row together`,'near');
+  if(togStreak>=2) add(44+Math.min(32,togStreak*6),'🔥',`${ordinal(togStreak)} day in a row together`,'near');
+  if(no1>=2) add(40+Math.min(24,no1*5),'🥇',`${no1} days as your closest`,'near');
+  if(apartStreak>=5) add(34+Math.min(34,apartStreak*1.1),'🌍',`${apartStreak} days apart`,'far');
+  // cumulative milestones
+  if([10,25,50,75,100,150,200,250,300,365,500].indexOf(togetherTotal)>=0) add(58+Math.min(26,togetherTotal/12),'💛',`${togetherTotal} days you've been together`,'near');
+  // local records
+  if(closestInDays>=7) add(36+Math.min(24,closestInDays/3),'💛',`Closest in ${closestInDays} days`,'near');
+  if(furthestInDays>=7) add(30+Math.min(22,furthestInDays/3),'🌍',`Furthest in ${furthestInDays} days`,'far');
+  // single-day states
+  if(tog(rec)) add(30+(c<2?12:c<10?8:c<50?4:0),'🤝','Together','near');
+  if(rank===1 && N>1) add(34,'🥇','Your closest friend today','near');
+  if(c<1000 && !tog(rec)) add(20+(c<300?6:0),'✨','You came close','near');
+  // always available
+  add(8,'🛰️','Your orbit for the day','mid');
+
+  C.sort((a,b)=>b.score-a.score);
+  return C[0];
+}
 /* ---- replay viewer ---- */
 function renderViewer(){
   phone.dataset.full='1';
@@ -1188,18 +1298,26 @@ function renderViewer(){
   const rec=(S.day!=null? f.records[S.day] : f.yesterday) || f.yesterday || f.records[f.records.length-1];
   if(!rec){ app.innerHTML=`<div class="viewer"><div class="vtop"><button class="back" data-go="${S.back||'home'}">${ICON.back}</button></div><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#9aa3ad;font:500 14px Inter,system-ui">No record for this day.</div></div>`; wire(); return; }
   const [n,u]=distParts(rec.closest);
+  const mo=momentFor(f,rec);
   app.innerHTML=`<div class="viewer">
     <div class="map" id="viewMap"></div><div class="vscrim"></div>
-    <div class="vtop"><button class="back" data-go="${S.back||'home'}">${ICON.back}</button>
-      <div class="vtitle">${f.name}<span>${fDate(rec.date)}</span></div></div>
-    <div class="maplegend"><span><i style="background:#D8B06A"></i>You</span><span><i style="background:${f.color}"></i>${f.name}</span></div>
-    <div class="vfoot">
-      <div class="vdist">${n}<small> ${u}</small></div>
-      <div class="vmeta">${rec.closest<300?'you were practically together':'closest you came'} · ${fmtClockSec(rec.closestT)} · ranked #${rec.rank}</div>
-      <button class="replaybtn" id="rbtn">${ICON.replay} Replay</button>
-    </div></div>`;
-  const ctrl=startReplay(document.getElementById('viewMap'), rec, f, {duration:9000, interactive:true, framePad:{top:104,bottom:208,x:30}});
-  document.getElementById('rbtn').onclick=()=> ctrl.restart();
+    <div class="vtop"><button class="back" data-go="${S.back||'home'}">${ICON.back}</button></div>
+    <div class="moment-award" id="momentAward"><span class="pill ${mo.kind==='far'?'far':''}"><span class="em">${mo.badge}</span>${mo.tag}</span></div>
+    <div class="story-content">
+      <div class="meta">${fDate(rec.date,{weekday:'short',day:'numeric',month:'short'})} · <span id="vClockLbl"></span><span id="vClock">${fmtClockSec(rec.closestT)}</span></div>
+      <div class="story-name">${f.name}</div>
+      <div class="hero-distance" id="vLiveDist">${n}<small>${u}</small></div>
+      <div class="story-rank"><span class="pip" style="background:${f.color}"></span>${ordinal(rec.rank)} closest of your ${world.friends.length} friends</div>
+    </div>
+    <button class="replaymini" id="rbtn" aria-label="Replay">${ICON.replay}</button>
+  </div>`;
+  const ctrl=startReplay(document.getElementById('viewMap'), rec, f, {duration:9000, interactive:false, framePad:{top:104,bottom:268,x:34}, onTime:(ep,focus,env,dist)=>{
+    const c=document.getElementById('vClock'); if(c&&ep!=null)c.textContent=fmtClockSec(ep);
+    const l=document.getElementById('vClockLbl'); if(l&&focus>0.9&&!l.textContent)l.textContent='closest at ';
+    const dv=document.getElementById('vLiveDist'); if(dv&&dist!=null){ const [dn,du]=distParts(focus>0.99?rec.closest:dist); dv.innerHTML=`${dn}<small>${du}</small>`; }
+    if(focus>0.985){ const aw=document.getElementById('momentAward'); if(aw) aw.classList.add('show'); }
+  }});
+  document.getElementById('rbtn').onclick=()=>{ const aw=document.getElementById('momentAward'); if(aw) aw.classList.remove('show'); ctrl.restart(); };
   wire();
 }
 
