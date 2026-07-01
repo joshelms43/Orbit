@@ -296,6 +296,20 @@ body{display:flex;align-items:center;justify-content:center;overflow:hidden}
 .cx-swatches{display:flex;gap:10px}
 .cx-sw{width:34px;height:34px;border-radius:50%;background:var(--c);border:2px solid transparent;cursor:pointer}
 .cx-sw.on{border-color:#fff;box-shadow:0 0 0 2px var(--c)}
+.cx-sw.fdr{box-shadow:0 0 0 1.5px rgba(255,255,255,.16),0 0 11px var(--c);animation:fdrPulse 2.6s ease-in-out infinite}
+.cx-sw.fdr.on{border-color:#fff;box-shadow:0 0 0 2px var(--c),0 0 16px var(--c)}
+@keyframes fdrPulse{0%,100%{box-shadow:0 0 0 1.5px rgba(255,255,255,.14),0 0 9px var(--c)}50%{box-shadow:0 0 0 1.5px rgba(255,255,255,.24),0 0 18px var(--c)}}
+.orb-wrap{display:flex;justify-content:center;padding:4px 0 16px}
+.orb-prev{width:54px;height:54px;border-radius:50%;position:relative;background:var(--c);
+  box-shadow:0 0 26px var(--c),0 0 9px var(--c);transition:background .2s ease,box-shadow .2s ease}
+.orb-prev::after{content:'';position:absolute;inset:37%;border-radius:50%;background:#FCF8F0;opacity:.92}
+.fdr-badge{display:inline-block;font-size:11px;font-weight:650;letter-spacing:.03em;color:#F4D27A;
+  background:rgba(244,210,122,.12);border:1px solid rgba(244,210,122,.32);border-radius:999px;padding:2px 9px;vertical-align:middle}
+.fdr-star{color:#F4D27A;font-size:12px;margin-left:4px}
+.fdr-line{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:#F4D27A;margin:18px 0 10px;
+  display:flex;align-items:center;gap:8px}
+.fdr-line::before,.fdr-line::after{content:'';height:1px;flex:1;background:linear-gradient(90deg,transparent,rgba(244,210,122,.34),transparent)}
+.fdr-thanks{margin-top:11px;font-size:12.5px;color:rgba(244,210,122,.85)}
 .cx-code{font-family:var(--disp);font-size:25px;letter-spacing:5px;text-align:center;color:var(--gold);background:var(--bg2);border:1px dashed var(--line);border-radius:12px;padding:14px;text-transform:lowercase}
 .cx-frow{display:flex;align-items:center;gap:9px;padding:7px 0;font-size:15px;color:var(--ink)}
 .cx-pending{margin-left:auto;font-size:11px;color:var(--ink3);letter-spacing:.02em}
@@ -601,8 +615,6 @@ function buildWorld(seed=SEED){
       let trail=0;for(let i=recs.length-1;i>=0;i--){if(test(recs[i]))trail++;else break;}return{current:trail,record:rec};};
     const s1km=run(r=>r.closest<=1000),s100=run(r=>r.closest<=100),sNo1=run(r=>r.rank===1);
     if(furthest>25000)furthestDay.badges.push({icon:'🌍',label:'Furthest ever'});
-    let c=0;for(const r of recs){if(r.closest<=1000){c++;if(c===30)r.badges.push({icon:'🔥',label:'30 days within 1 km'});}else c=0;}
-    let n1=0;for(const r of recs){if(r.rank===1){n1++;if(n1===25)r.badges.push({icon:'🥇',label:'25 days ranked #1'});}}
     if(f.sinceDays>365)recs[0].badges.push({icon:'🏠',label:'First year together'});
     else if(f.sinceDays>100)recs[0].badges.push({icon:'🤝',label:'100 days together'});
     return{...f,records:recs,yesterday:recs[recs.length-1],median,avg,furthest,furthestDay:furthestDay.date,
@@ -716,7 +728,7 @@ function replayTimeline(rawP, t0, tC){
 }
 
 function makePaint(ctx, project, pts, ci, fcol, DPR, distStr, starts){
-  const gold='#D8B06A'; const S=starts||{me:0,them:0};
+  const gold=(MYPROFILE&&MYPROFILE.color)||'#D8B06A'; const S=starts||{me:0,them:0};
   const lerpLL=(a,b,t)=>({lat:a.lat+(b.lat-a.lat)*t,lng:a.lng+(b.lng-a.lng)*t});
   function headAt(tt){let hi=pts.length-2;for(let i=0;i<pts.length-1;i++){if(tt<=pts[i+1].t){hi=i;break;}}if(hi<0)hi=0;
     const seg=(tt-pts[hi].t)/Math.max(1,pts[hi+1].t-pts[hi].t);
@@ -1093,7 +1105,9 @@ function renderHome(){
       <div class="nm"><i style="background:${f.color}"></i>${f.name}</div>
       <div class="d ${close?'close':''}">${n}<small> ${u}</small></div>
       <div class="t">closest at ${fmtClock(f.yesterday.closestMin)}</div></div>`;}).join('');
-  const lb=world.leaderboard.map((f,i)=>{const[n,u]=distParts(f.median);
+  const avg30=f=>{const r=f.records.slice(-30);return r.length?r.reduce((s,x)=>s+x.closest,0)/r.length:(f.avg||0);};
+  const lbList=world.leaderboard.slice().sort((a,b)=>avg30(a)-avg30(b));
+  const lb=lbList.map((f,i)=>{const a30=avg30(f);const[n,u]=distParts(a30);const together=a30<100;
     const sub = f.streak1km.current>0 ? `within 1 km · ${f.streak1km.current} day${f.streak1km.current===1?'':'s'} running`
                                       : `${f.within1k} days within 1 km`;
     return `<div class="lb-row" data-friend="${f.id}">
@@ -1101,7 +1115,7 @@ function renderHome(){
       <div class="lb-dot" style="background:${f.color}">${f.name[0]}</div>
       <div class="lb-main"><div class="lb-name">${f.name}</div>
         <div class="lb-sub">${sub}</div></div>
-      <div class="lb-val"><b>${n}<small> ${u}</small></b><small>typical day</small></div>
+      <div class="lb-val">${together?'<b>Together</b>':`<b>${n}<small> ${u}</small></b>`}<small>typical day</small></div>
       <div class="chev">${ICON.fwd}</div>
     </div>`;}).join('');
   const N=world.friends.length, yIdx=world.DAYS-1;
@@ -1154,8 +1168,8 @@ function renderHome(){
       <span class="rec-name">${furthestEver.f.name}</span>
       <span class="rec-val gold">${distParts(furthestEver.r.closest).join(' ')}</span></div>
     <div class="rec-sub">${fDate(furthestEver.r.date,{weekday:'long',day:'numeric',month:'short'})}</div></div>` : '';
-  const recordsHtml = `${furthestCard}
-    ${streakCard('Within 100 m, in a row','🔥', w100Lead, x=>`${x.f.name}: ${ordinal(within100Count(x.f,yIdx))} day you've been together`)}
+  const recordsHtml = `${streakCard('Together, days in a row','🔥', w100Lead, x=>`${x.f.name}: ${ordinal(within100Count(x.f,yIdx))} day you've been together`)}
+    ${furthestCard}
     ${streakCard('Your furthest, days running','↔️', farLead)}`;
   app.innerHTML=`<div class="screen">
     <div class="topbar"><div class="wordmark">Or<b>bit</b></div>
@@ -1269,9 +1283,9 @@ async function renderBoards(){
     </div>`;}).join(''):'<div class="bd-empty">No days recorded yet.</div>';
 
   app.innerHTML=`<div class="screen">${head}
-    <div class="sec-h"><h3>Longest streaks</h3><span>anyone in your circle</span></div>
+    <div class="sec-h"><h3>Longest streaks together</h3></div>
     <div class="card">${srow}</div>
-    <div class="sec-h"><h3>Furthest apart</h3><span>biggest gaps</span></div>
+    <div class="sec-h"><h3>Furthest apart</h3></div>
     <div class="card">${frow}</div>
     <div style="height:24px"></div>
   </div>`;
@@ -1328,16 +1342,10 @@ function renderFriend(){
     <div class="statgrid">
       ${stat('Typical day', distParts(f.median).join('<small> ')+'</small>')}
       ${stat('Furthest ever', distParts(f.furthest).join('<small> ')+'</small>')}
-      ${stat('Days within 100 m', f.within100)}
-      ${stat('Days within 1 km', f.within1k)}
+      ${stat('Days together', f.within100)}
+      ${stat('Days the furthest', f.within1k)}
       ${stat('Days within 5 km', f.within5k)}
       ${stat('Days ranked #1', f.daysNo1)}
-    </div>
-
-    <div class="streaks">
-      ${streak('🔥','Within 1 km',f.streak1km)}
-      ${streak('🤏','Within 100 m',f.streak100)}
-      ${streak('🥇','Ranked #1',f.streakNo1)}
     </div>
 
     ${hlHtml?`<div class="sec-h"><h3>Highlights</h3></div><div class="hl-row">${hlHtml}</div>`:''}
@@ -1601,7 +1609,7 @@ async function friendRows(){
   const {data:f}=await sb.from('friendships').select('user_a,user_b,since');
   const others=(f||[]).map(r=>({id:r.user_a===ME?r.user_b:r.user_a, since:r.since}));
   if(!others.length) return [];
-  const {data:profs}=await sb.from('profiles').select('id,name,color,home_lat,home_lng').in('id',others.map(o=>o.id));
+  const {data:profs}=await sb.from('profiles').select('id,name,color,home_lat,home_lng,founder').in('id',others.map(o=>o.id));
   const by=Object.fromEntries((profs||[]).map(p=>[p.id,p]));
   return others.map(o=>({...(by[o.id]||{}), id:o.id, since:o.since}));
 }
@@ -1626,7 +1634,7 @@ async function renderAddFriend(first){
     friendRequests().catch(()=>({incoming:[],outgoing:[]}))
   ]);
   const friendList = fr.length
-    ? fr.map(f=>`<div class="cx-frow"><span class="cx-fdot" style="background:${f.color||'#888'}"></span>${f.name||'Friend'}</div>`).join('')
+    ? fr.map(f=>`<div class="cx-frow"><span class="cx-fdot" style="background:${f.color||'#888'}"></span>${f.name||'Friend'}${f.founder?' <span class="fdr-star">✦</span>':''}</div>`).join('')
     : '<div class="cx-empty">No friends yet.</div>';
   const incoming = rq.incoming.map(r=>`<div class="cx-req">
       <span class="cx-fdot" style="background:${r.who.color||'#888'}"></span>
@@ -1679,9 +1687,22 @@ async function renderAddFriend(first){
 
 async function renderAccount(){
   const code=(MYPROFILE.invite_code||'------');
+  const std=['#D8B06A','#7C9CB5','#C39B86','#8FA98C','#B5A87C','#A98CB5','#C87E7E','#6CA6A0'];
+  const fdr=['#F4D27A','#5FD3B0','#9E7BE6'];       // exclusive — founders only
+  const cur=(MYPROFILE.color)||'#D8B06A';
+  const isFdr=!!MYPROFILE.founder;
   app.innerHTML = shell(`
     <div class="cx-mark">Account</div>
-    <div class="cx-tag">${MYPROFILE.name||''}</div>
+    <div class="cx-tag">${MYPROFILE.name||''}${isFdr?' <span class="fdr-badge">✦ Founding member</span>':''}</div>
+    <div class="cx-card">
+      <label class="cx-label">Your orb</label>
+      <div class="orb-wrap"><span id="orbPrev" class="orb-prev" style="--c:${cur}"></span></div>
+      <div class="cx-swatches">${std.map(c=>`<button class="cx-sw${c===cur?' on':''}" data-c="${c}" style="--c:${c}"></button>`).join('')}</div>
+      ${isFdr?`<div class="fdr-line">✦ Founder colours</div>
+        <div class="cx-swatches">${fdr.map(c=>`<button class="cx-sw fdr${c===cur?' on':''}" data-c="${c}" style="--c:${c}"></button>`).join('')}</div>
+        <div class="cx-note fdr-thanks">A little thank-you for being here from day one. ✦</div>`:''}
+      <div id="cx-cmsg" class="cx-msg"></div>
+    </div>
     <div class="cx-card"><label class="cx-label">Your invite code</label><div class="cx-code">${code}</div>
       <button id="cx-add" class="cx-btn ghost">Add / manage friends</button></div>
     <div class="cx-card">
@@ -1693,6 +1714,12 @@ async function renderAccount(){
     <div class="cx-card"><div class="cx-note">Location is logged only while Orbit is open in the foreground. Continuous background tracking comes with the native app.</div></div>
     <button id="cx-out" class="cx-btn danger">Sign out</button>
     <button id="cx-back" class="cx-btn ghost" style="margin-top:8px">Back</button>`);
+  app.querySelectorAll('.cx-sw').forEach(b=>b.onclick=async()=>{ const c=b.dataset.c;
+    app.querySelectorAll('.cx-sw').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+    const prev=qs('orbPrev'); if(prev)prev.style.setProperty('--c',c);
+    MYPROFILE.color=c; const m=qs('cx-cmsg'); if(m)m.textContent='Saving…';
+    try{ await sb.from('profiles').update({color:c}).eq('id',ME); if(m)m.textContent='Saved ✓ — your orb is updated.'; }
+    catch(e){ if(m)m.textContent='Could not save.'; } });
   qs('cx-add').onclick=()=>renderAddFriend(false);
   qs('cx-back').onclick=()=>go('home');
   qs('cx-out').onclick=async()=>{ await sb.auth.signOut(); location.reload(); };
