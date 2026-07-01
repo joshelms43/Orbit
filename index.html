@@ -1331,6 +1331,7 @@ function renderFirstReveal(){
 }
 
 function startLogging(){
+  if(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) return;  // native: background plugin logs instead
   if(!navigator.geolocation) return;
   let last=null;
   navigator.geolocation.watchPosition(async pos=>{
@@ -1341,6 +1342,53 @@ function startLogging(){
     if(MYPROFILE && MYPROFILE.home_lat==null){ MYPROFILE.home_lat=lat; MYPROFILE.home_lng=lng;
       try{ await sb.from('profiles').update({home_lat:lat,home_lng:lng}).eq('id',ME); }catch(e){} }
   }, ()=>{}, {enableHighAccuracy:true, maximumAge:15000, timeout:20000});
+}
+
+/* ---------- native background tracking (Capacitor + @capgo/background-geolocation) ----------
+   The native iOS build loads this same page from Vercel, but window.Capacitor is injected,
+   so we can drive the background-geolocation plugin straight from here. Each fix is POSTed to
+   the Supabase ingest edge function, authenticated by a durable per-device token — a login JWT
+   expires hourly, so it's useless once the app is closed; the device token never expires. */
+let BG_STARTED=false, DEVICE_TOKEN=null;
+async function ensureDeviceToken(){
+  if(DEVICE_TOKEN) return DEVICE_TOKEN;
+  const key='orbit_dt_'+ME;
+  try{ const cached=localStorage.getItem(key); if(cached){ DEVICE_TOKEN=cached; return cached; } }catch(e){}
+  try{
+    const {data,error}=await sb.from('device_tokens').insert({user_id:ME, label:'ios'}).select('token').single();
+    if(error||!data) return null;
+    DEVICE_TOKEN=data.token; try{ localStorage.setItem(key,DEVICE_TOKEN); }catch(e){}
+    return DEVICE_TOKEN;
+  }catch(e){ return null; }
+}
+async function postFix(loc){
+  if(!loc || loc.latitude==null || loc.longitude==null) return;
+  const tok=await ensureDeviceToken(); if(!tok) return;
+  const body={ location:{ timestamp:new Date(loc.time||Date.now()).toISOString(),
+    coords:{ latitude:loc.latitude, longitude:loc.longitude, accuracy:loc.accuracy } } };
+  try{
+    await fetch(CFG.SUPABASE_URL+'/functions/v1/ingest-location', {
+      method:'POST',
+      headers:{ 'content-type':'application/json', 'x-device-token':tok },
+      body:JSON.stringify(body)
+    });
+  }catch(e){}
+}
+async function startBackgroundTracking(){
+  const cap=window.Capacitor;
+  if(!cap || !cap.isNativePlatform || !cap.isNativePlatform()) return;  // native build only
+  if(BG_STARTED) return; BG_STARTED=true;
+  await ensureDeviceToken();
+  try{
+    const BG=cap.registerPlugin('BackgroundGeolocation');
+    await BG.start({
+      backgroundTitle:'Orbit',
+      backgroundMessage:'Measuring how close you and your friends come today.',
+      requestPermissions:true,
+      stale:false,
+      distanceFilter:25
+    }, (location, error)=>{ if(error) return; postFix(location); });
+  }catch(e){ BG_STARTED=false; }
 }
 
 /* ---------- replay hardening ----------
@@ -1436,6 +1484,7 @@ async function bootReal(){
   MYPROFILE=prof||{id:ME};
   if(!MYPROFILE.name){ renderOnboard(); return; }
   startLogging();
+  startBackgroundTracking();
   const w=await loadWorld();
   if(w.empty==='no-friends'){ renderAddFriend(true); return; }
   if(w.empty==='no-records'){ renderFirstReveal(); return; }
