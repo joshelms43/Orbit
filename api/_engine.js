@@ -129,7 +129,7 @@ function posAtTime(fixes,t){
   if(t>=last.t)return{lat:last.lat,lng:last.lng};
   let lo=0,hi=fixes.length-1;
   while(hi-lo>1){const mid=(lo+hi)>>1;(fixes[mid].t<=t)?lo=mid:hi=mid;}
-  const a=fixes[lo],b=fixes[hi],r=(t-a.t)/(b.t-a.t);
+  const a=fixes[lo],b=fixes[hi],dt=b.t-a.t,r=dt>0?(t-a.t)/dt:0;
   return{lat:a.lat+(b.lat-a.lat)*r,lng:a.lng+(b.lng-a.lng)*r};
 }
 function processDay(meFixes,friendFixes){
@@ -164,6 +164,7 @@ function processDay(meFixes,friendFixes){
       if(d2<bestD2){bestD2=d2;tStar=ta+(tb-ta)*s;}
     }
   }
+  if(!isFinite(tStar)) tStar=meFixes[0].t;
   const lo=Math.max(meFixes[0].t,friendFixes[0].t), hi=Math.min(meFixes[meFixes.length-1].t,friendFixes[friendFixes.length-1].t);
   const closest=haversine(posAtTime(meFixes,tStar),posAtTime(friendFixes,tStar));
   // ONE shared clock: every frame is a single wall-clock instant (7:15 beside 7:15). For this data the
